@@ -22,7 +22,17 @@ export const handlers = {
 
   [MSG.OPEN_DASHBOARD]: async (payload) => {
     const route = Object.values(ROUTES).includes(payload?.route) ? payload.route : ROUTES.HOME;
-    await chrome.tabs.create({ url: dashboardUrl(route) });
+    const query = typeof payload?.query === 'string' && /^[\w=&%.-]*$/.test(payload.query) ? payload.query : '';
+    // Reuse an open dashboard tab instead of piling up new ones.
+    const base = chrome.runtime.getURL('src/pages/dashboard/dashboard.html');
+    const existing = (await chrome.tabs.query({})).find((t) => t.url?.startsWith(base));
+    const url = `${dashboardUrl(route)}${query ? `?${query}` : ''}`;
+    if (existing?.id !== undefined) {
+      await chrome.tabs.update(existing.id, { url, active: true });
+      await chrome.windows.update(existing.windowId, { focused: true });
+    } else {
+      await chrome.tabs.create({ url });
+    }
     return true;
   },
 };

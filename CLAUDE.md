@@ -28,7 +28,9 @@ or task lands.
 npm run check      # validate + unit tests (run before every commit)
 npm run validate   # static policy checks: manifest, CSP, banned APIs, file refs
 npm test           # node:test unit tests in tests/
-npm run smoke      # load the unpacked extension in Chromium and exercise it
+npm run smoke      # load the unpacked extension in Chromium and exercise every feature
+                   # (phase B uses a temp copy with test-server host access, because
+                   #  automation can't grant activeTab or accept permission prompts)
 npm run icons      # regenerate assets/icons/*.png
 ```
 
@@ -47,7 +49,14 @@ Load in Chrome: `chrome://extensions` → Developer mode → Load unpacked → r
   or read `chrome.storage.local`.
 - Schema changes: bump `DB_VERSION` and add a migration in
   `src/shared/db/schema.js`; never edit an existing migration.
-- Settings: add defaults to `DEFAULT_SETTINGS` in `src/shared/settings.js`.
+- Settings: add defaults to `DEFAULT_SETTINGS` and validation to
+  `normalizeSettings` in `src/shared/settings.js`.
+- Put pure logic in `*-model.js` / shared modules and unit-test it; keep
+  chrome.*/IndexedDB calls in thin feature modules.
+- Use `confirmDialog`/`promptDialog`/`selectDialog` from `src/shared/ui.js`,
+  never `window.confirm/prompt`. Favicons only via `favicon()` (Chrome's cache).
+- Keep literal remote URLs out of `src/` (the validator fails on them); build
+  permission patterns from parts (see `httpsPatternForHost`).
 - DOM: build with `h()` from `src/shared/dom.js`. **Never** assign untrusted
   strings (page titles, URLs, imported data) to `innerHTML`.
 - CSP forbids inline scripts, inline `style=""`, `<style>` blocks and remote

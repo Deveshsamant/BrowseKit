@@ -151,6 +151,12 @@ export function validateExtension(root) {
       for (const [re, what] of BANNED_CODE) {
         if (re.test(code)) err(`${rel(file)}: banned API — ${what}`);
       }
+      if (file.includes(`${join('src', 'content')}`) && /^\s*(import|export)\s/m.test(code)) {
+        err(`${rel(file)}: content scripts must be classic scripts (no import/export)`);
+      }
+      for (const m of code.matchAll(/['"`](src\/content\/[\w./-]+\.js)['"`]/g)) {
+        if (!existsSync(join(root, m[1]))) err(`${rel(file)}: references missing content script ${m[1]}`);
+      }
       const specifiers = [
         ...code.matchAll(/\bimport\s+(?:[^'"`]*?\sfrom\s+)?['"]([^'"]+)['"]/g),
         ...code.matchAll(/\bexport\s+[^'"`;]*?\sfrom\s+['"]([^'"]+)['"]/g),

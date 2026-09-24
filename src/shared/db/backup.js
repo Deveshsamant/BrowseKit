@@ -10,9 +10,9 @@ export const BACKUP_FORMAT_VERSION = 1;
 export const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
 
 /**
- * @param {{ stores: Record<string, any[]>, settings: Record<string, any>, appVersion: string, now?: Date }} input
+ * @param {{ stores: Record<string, any[]>, settings: Record<string, any>, mediaSites?: Record<string, any>, appVersion: string, now?: Date }} input
  */
-export function buildBackup({ stores, settings, appVersion, now = new Date() }) {
+export function buildBackup({ stores, settings, mediaSites = {}, appVersion, now = new Date() }) {
   return {
     format: BACKUP_FORMAT,
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -21,6 +21,7 @@ export function buildBackup({ stores, settings, appVersion, now = new Date() }) 
     exportedAt: now.toISOString(),
     stores: Object.fromEntries(STORE_NAMES.map((s) => [s, stores[s] ?? []])),
     settings,
+    mediaSites,
   };
 }
 
@@ -48,6 +49,7 @@ export function validateBackup(data) {
   }
   if (!isObject(d.stores)) errors.push('Backup has no "stores" object.');
   if (d.settings !== undefined && !isObject(d.settings)) errors.push('"settings" must be an object.');
+  if (d.mediaSites !== undefined && !isObject(d.mediaSites)) errors.push('"mediaSites" must be an object.');
   if (errors.length) return { ok: false, errors };
 
   for (const name of Object.keys(d.stores)) {

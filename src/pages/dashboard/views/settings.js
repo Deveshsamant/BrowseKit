@@ -2,15 +2,27 @@ import { MSG } from '../../../shared/constants.js';
 import { MAX_BACKUP_BYTES, buildBackup, validateBackup } from '../../../shared/db/backup.js';
 import { clearAll, restore, snapshot } from '../../../shared/db/repository.js';
 import { h, mount, toast } from '../../../shared/dom.js';
+import { downloadFile } from '../../../shared/files.js';
 import { formatBytes, formatNumber, isoDay } from '../../../shared/format.js';
 import { send } from '../../../shared/messages.js';
-import { THEMES, ensureSettings, getSettings, onSettingsChanged, updateSettings } from '../../../shared/settings.js';
+import {
+  THEMES,
+  ensureSettings,
+  getSettings,
+  onSettingsChanged,
+  updateSettings,
+} from '../../../shared/settings.js';
+import { confirmDialog, errorMessage } from '../../../shared/ui.js';
+import { MEDIA_SITES_KEY, getSites, grantedOrigins } from '../../../features/media/media-sites.js';
+import { settingRow, toggle } from './media.js';
 
 const THEME_LABELS = { system: 'System', light: 'Light', dark: 'Dark' };
 
 /** @param {HTMLElement} root */
 export async function render(root) {
   const settings = await getSettings();
+  const fail = (err) => toast(errorMessage(err), 'error');
+  const save = (patch) => updateSettings(patch);
 
   // Appearance
   const themeInputs = THEMES.map((theme) =>
@@ -19,7 +31,7 @@ export async function render(root) {
       name: 'theme',
       value: theme,
       checked: settings.theme === theme,
-      onChange: () => updateSettings({ theme }).catch((err) => toast(String(err), 'error')),
+      onChange: () => save({ theme }).catch(fail),
     }),
   );
   const themeControl = h(
@@ -28,22 +40,35 @@ export async function render(root) {
     THEMES.map((theme, i) => h('label', null, themeInputs[i], THEME_LABELS[theme])),
   );
 
+  // Behaviour
+  const openIn = h(
+    'select',
+    { class: 'btn select', 'aria-label': 'Open collections in', onChange: () => save({ vault: { openIn: openIn.value } }).catch(fail) },
+    h('option', { value: 'current-window', selected: settings.vault.openIn === 'current-window' }, 'Current window'),
+    h('option', { value: 'new-window', selected: settings.vault.openIn === 'new-window' }, 'New window'),
+  );
+  const toggles = {
+    skipDuplicates: toggle(settings.vault.skipDuplicates, (v) => save({ vault: { skipDuplicates: v } })),
+    closeAfterSave: toggle(settings.vault.closeAfterSave, (v) => save({ vault: { closeAfterSave: v } })),
+    markWatchedOnOpen: toggle(settings.watchLater.markWatchedOnOpen, (v) => save({ watchLater: { markWatchedOnOpen: v } })),
+    cleanUrlsOnSave: toggle(settings.privacy.cleanUrlsOnSave, (v) => save({ privacy: { cleanUrlsOnSave: v } })),
+  };
+
   // Data
   const importErrors = h('ul', { class: 'error-list', hidden: true });
+  const importMode = h(
+    'select',
+    { class: 'btn select', 'aria-label': 'Import mode' },
+    h('option', { value: 'merge' }, 'Merge with existing data'),
+    h('option', { value: 'replace' }, 'Replace all existing data'),
+  );
   const fileInput = h('input', {
     type: 'file',
     accept: 'application/json,.json',
     class: 'visually-hidden',
     onChange: () => importFile(fileInput, importMode.value, importErrors),
   });
-  const importMode = h(
-    'select',
-    { class: 'btn', 'aria-label': 'Import mode' },
-    h('option', { value: 'merge' }, 'Merge with existing data'),
-    h('option', { value: 'replace' }, 'Replace all existing data'),
-  );
 
-  // About
   const diagnostics = h('dl', { class: 'kv' }, h('dt', null, 'Status'), h('dd', null, 'Checking…'));
   loadDiagnostics(diagnostics);
 
@@ -57,21 +82,33 @@ export async function render(root) {
     h(
       'div',
       { class: 'stack' },
+      h('section', { class: 'card' }, h('h2', { class: 'card__title' }, 'Appearance'), h('div', { class: 'setting-row' }, h('span', null, 'Theme'), themeControl)),
       h(
         'section',
         { class: 'card' },
-        h('h2', { class: 'card__title' }, 'Appearance'),
-        h('div', { class: 'setting-row' }, h('span', null, 'Theme'), themeControl),
+        h('h2', { class: 'card__title' }, 'TabVault'),
+        settingRow('Open collections in', openIn),
+        settingRow('Skip tabs already saved in the same collection', toggles.skipDuplicates),
+        settingRow('Close tabs after saving them', toggles.closeAfterSave),
+      ),
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card__title' }, 'Watch Later'),
+        settingRow('Mark items as watched when opened from BrowseKit', toggles.markWatchedOnOpen),
+      ),
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card__title' }, 'Privacy'),
+        settingRow('Remove tracking parameters from URLs when saving', toggles.cleanUrlsOnSave),
+        h('p', { class: 'muted small' }, 'Only well-known trackers are removed (utm_*, fbclid, gclid…). Media Boost defaults and site access are under Media Boost.'),
       ),
       h(
         'section',
         { class: 'card' },
         h('h2', { class: 'card__title' }, 'Backup & data'),
-        h(
-          'p',
-          { class: 'muted' },
-          'Backups are plain JSON files saved to your computer. BrowseKit never uploads them anywhere.',
-        ),
+        h('p', { class: 'muted' }, 'Backups are plain JSON files saved to your computer. BrowseKit never uploads them anywhere.'),
         h(
           'div',
           { class: 'btn-row' },
@@ -94,7 +131,11 @@ export async function render(root) {
 
   return onSettingsChanged((next) => {
     for (const input of themeInputs) input.checked = input.value === next.theme;
-    loadDiagnostics(diagnostics);
+    openIn.value = next.vault.openIn;
+    toggles.skipDuplicates.checked = next.vault.skipDuplicates;
+    toggles.closeAfterSave.checked = next.vault.closeAfterSave;
+    toggles.markWatchedOnOpen.checked = next.watchLater.markWatchedOnOpen;
+    toggles.cleanUrlsOnSave.checked = next.privacy.cleanUrlsOnSave;
   });
 }
 
@@ -113,7 +154,7 @@ async function loadDiagnostics(/** @type {HTMLElement} */ dl) {
       row('Background worker', h('span', { class: 'badge' }, 'Running')),
     );
   } catch (err) {
-    mount(dl, row('Background worker', `Unavailable: ${err instanceof Error ? err.message : err}`));
+    mount(dl, row('Background worker', `Unavailable: ${errorMessage(err)}`));
   }
 }
 
@@ -122,19 +163,15 @@ async function exportBackup() {
     const backup = buildBackup({
       stores: await snapshot(),
       settings: await getSettings(),
+      mediaSites: await getSites(),
       appVersion: chrome.runtime.getManifest().version,
     });
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = h('a', { href: url, download: `browsekit-backup-${isoDay()}.json` });
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    toast(`Backup exported (${formatBytes(blob.size)}).`);
+    const json = JSON.stringify(backup, null, 2);
+    downloadFile(`browsekit-backup-${isoDay()}.json`, json, 'application/json');
+    toast(`Backup exported (${formatBytes(json.length)}).`);
   } catch (err) {
     console.error('[BrowseKit] export', err);
-    toast(`Export failed: ${err instanceof Error ? err.message : err}`, 'error');
+    toast(`Export failed: ${errorMessage(err)}`, 'error');
   }
 }
 
@@ -171,33 +208,49 @@ async function importFile(input, mode, errorList) {
     showErrors(result.errors);
     return;
   }
+  const replace = mode === 'replace';
   if (
-    mode === 'replace' &&
-    !confirm('Replace ALL BrowseKit data with this backup? Current data will be deleted.')
+    replace &&
+    !(await confirmDialog({
+      title: 'Replace all BrowseKit data?',
+      body: 'Current collections, Watch Later, sessions and settings will be replaced by the backup.',
+      confirmLabel: 'Replace',
+      danger: true,
+    }))
   ) {
     return;
   }
   try {
-    await restore(result.backup.stores, mode === 'replace' ? 'replace' : 'merge');
+    await restore(result.backup.stores, replace ? 'replace' : 'merge');
     if (result.backup.settings) await updateSettings(result.backup.settings);
+    if (result.backup.mediaSites) {
+      const current = replace ? {} : await getSites();
+      await chrome.storage.local.set({ [MEDIA_SITES_KEY]: { ...current, ...result.backup.mediaSites } });
+    }
     const total = Object.values(result.backup.stores).reduce((n, rows) => n + rows.length, 0);
     toast(`Imported ${formatNumber(total)} records.`);
   } catch (err) {
     console.error('[BrowseKit] import', err);
-    showErrors([`Could not write data: ${err instanceof Error ? err.message : err}`]);
+    showErrors([`Could not write data: ${errorMessage(err)}`]);
   }
 }
 
 async function eraseAll() {
-  if (!confirm('Erase ALL BrowseKit data on this device? This cannot be undone. Consider exporting a backup first.')) {
-    return;
-  }
+  const ok = await confirmDialog({
+    title: 'Erase all BrowseKit data?',
+    body: 'This permanently deletes collections, Watch Later, sessions, remembered media sites, per-site access and settings on this device. Consider exporting a backup first.',
+    confirmLabel: 'Erase everything',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await clearAll();
     await chrome.storage.local.clear();
+    const origins = await grantedOrigins();
+    if (origins.length) await chrome.permissions.remove({ origins });
     await ensureSettings();
     toast('All BrowseKit data erased.');
   } catch (err) {
-    toast(`Erase failed: ${err instanceof Error ? err.message : err}`, 'error');
+    toast(`Erase failed: ${errorMessage(err)}`, 'error');
   }
 }

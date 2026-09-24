@@ -6,6 +6,8 @@ import { ROUTES, dashboardUrl } from '../shared/constants.js';
 import { openDatabase } from '../shared/db/database.js';
 import { getMeta, setMeta } from '../shared/db/repository.js';
 import { ensureSettings } from '../shared/settings.js';
+import { syncRegisteredMediaScript } from '../features/media/media-sites.js';
+import { createMenus } from './menus.js';
 
 /**
  * @param {chrome.runtime.InstalledDetails} details
@@ -18,6 +20,8 @@ export async function handleInstalled(details) {
   if (!(await getMeta('installedAt'))) await setMeta('installedAt', now);
   await setMeta('lastUpdatedAt', now);
   await setMeta('appVersion', chrome.runtime.getManifest().version);
+  await createMenus();
+  await syncRegisteredMediaScript();
 
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     await chrome.tabs.create({ url: `${dashboardUrl(ROUTES.HOME)}?welcome=1` });

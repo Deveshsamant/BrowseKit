@@ -80,3 +80,12 @@ test('flags missing referenced files', () => {
   const errors = validateMutated((dir) => rmSync(join(dir, 'assets', 'icons', 'icon48.png')));
   assert.ok(errors.some((e) => e.includes('icon48.png')));
 });
+
+test('content scripts must be classic scripts and referenced content scripts must exist', () => {
+  const errors = validateMutated((dir) => {
+    writeFileSync(join(dir, 'src', 'content', 'bad.js'), "import x from './y.js';\n");
+    writeFileSync(join(dir, 'src', 'ref.js'), "export const s = 'src/content/missing.js';\n");
+  });
+  assert.ok(errors.some((e) => e.includes('classic scripts')));
+  assert.ok(errors.some((e) => e.includes('missing content script')));
+});

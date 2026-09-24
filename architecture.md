@@ -32,23 +32,37 @@ BrowseKit/
 ├── src/
 │   ├── background/
 │   │   ├── service-worker.js     # entry: registers every listener synchronously
-│   │   ├── lifecycle.js          # onInstalled/onStartup: settings defaults, DB migrations
-│   │   └── handlers.js           # message-type → handler map (request/response API)
-│   ├── content/                  # (Phase 4/5) classic, non-module scripts injected into pages
-│   │   └── media-boost.js, page-tools.js
-│   ├── features/                 # (Phase 1+) domain logic per feature, on top of shared/db
-│   │   └── vault/, watch-later/, sessions/, tools/, media/
+│   │   ├── lifecycle.js          # onInstalled: settings, DB migrations, menus, media script sync
+│   │   ├── handlers.js           # message-type → handler map (request/response API)
+│   │   ├── menus.js              # right-click entries (Watch Later, TabVault)
+│   │   ├── commands.js           # keyboard commands (Watch Later, TabVault, Media Boost)
+│   │   └── badge.js              # short toolbar-badge feedback
+│   ├── content/
+│   │   └── media-boost.js        # classic, idempotent media controller (isolated world)
+│   ├── features/                 # domain logic per feature, on top of shared/db
+│   │   ├── vault/                # vault-model.js (pure), vault.js (IDB), save.js (flow)
+│   │   ├── watch-later/          # watch-later.js
+│   │   ├── tab-manager/          # tab-model.js (pure: duplicates, search)
+│   │   ├── sessions/             # sessions.js
+│   │   ├── media/                # media-control.js (inject/run), media-sites.js (prefs + access)
+│   │   └── tools/                # page-tools.js (page text, print, screenshot)
 │   ├── pages/
 │   │   ├── dashboard/            # full-tab app (also the options page)
 │   │   │   ├── dashboard.html/.css/.js   # shell + hash router
-│   │   │   └── views/            # one module per section (home, vault, …)
-│   │   └── popup/                # toolbar popup
+│   │   │   └── views/            # home, vault, watch-later, media, sessions, tools, settings
+│   │   └── popup/                # toolbar popup: Save · Media · Tabs · Tools panels
 │   ├── shared/                   # code usable by SW + pages (never by content scripts)
 │   │   ├── constants.js          # app name, routes, message types
 │   │   ├── messages.js           # request/response envelope + router factory
 │   │   ├── settings.js           # chrome.storage.local settings with defaults
 │   │   ├── theme.js              # dark/light/system theme application
 │   │   ├── dom.js                # tiny safe DOM builder (no innerHTML)
+│   │   ├── ui.js                 # <dialog> confirm/prompt/select, empty states, favicons
+│   │   ├── tabs.js               # collect/open/focus tabs (never tab groups)
+│   │   ├── urls.js               # saveability, duplicate keys, tracking-param cleaner (pure)
+│   │   ├── text-stats.js         # word/char counts, reading time (pure)
+│   │   ├── qr.js / qr-view.js    # offline QR encoder (pure) + SVG/PNG rendering
+│   │   ├── files.js              # blob: downloads, file reading
 │   │   ├── format.js             # date/number/byte formatting helpers
 │   │   └── db/
 │   │       ├── schema.js         # DB name, version, store names, migrations
@@ -109,7 +123,8 @@ Notes:
 
 - Key `settings`: one object, deep-merged with `DEFAULT_SETTINGS` on read, so
   new settings get defaults without migrations. Includes `theme`.
-- Key `media.sites` (Media Boost phase): per-site `{ speed, volume, boost }`.
+- Key `media.sites`: per-site `{ speed, volume, updatedAt }` (volume is a
+  multiplier, >1 = boost).
   Kept here, not in IndexedDB, because **content scripts can read
   `chrome.storage.local` directly** at page load without waking the service
   worker, and the data is small.
@@ -125,7 +140,7 @@ URL (no `downloads` permission needed):
 { "format": "browsekit-backup", "formatVersion": 1, "schemaVersion": 1,
   "exportedAt": "…ISO…", "appVersion": "0.1.0",
   "stores": { "collections": [], "vaultTabs": [], "watchLater": [], "sessions": [], "meta": [] },
-  "settings": { … } }
+  "settings": { … }, "mediaSites": { … } }
 ```
 
 Import validates the whole file before writing anything (`backup.js`, pure and
@@ -143,13 +158,13 @@ make host access *optional* and per-site.
 | Permission | Phase | Why | Install warning |
 | --- | --- | --- | --- |
 | `storage` | Foundation ✅ | Settings in `chrome.storage.local` | none |
-| `tabs` | TabVault / Tab Manager | Read URL + title of *all* tabs (save window / all windows, search open tabs, duplicates). `activeTab` only covers the current tab. | "Read your browsing history" — unavoidable for these features |
-| `favicon` | TabVault | Show favicons from Chrome's local cache instead of fetching remote icons | none |
-| `contextMenus` | Watch Later | Right-click "Save to Watch Later" | none |
-| `activeTab` | Watch Later / Media / Tools | Temporary access to the current tab after a click, shortcut or context-menu action | none |
-| `scripting` | Media Boost / Tools | Inject content scripts on demand (activeTab) and register per-site scripts | none by itself |
-| `sessions` | Tab Manager | Recently closed tabs/windows (`chrome.sessions`) | combined with tabs |
-| `optional_host_permissions: ["https://*/*", "http://*/*"]` | Media Boost | Requested **per origin at runtime** only when the user enables "Remember on this site" / in-page shortcuts. Never granted at install. | shown only when user opts in |
+| `tabs` | TabVault / Tab Manager ✅ | Read URL + title of *all* tabs (save window / all windows, search open tabs, duplicates). `activeTab` only covers the current tab. | "Read your browsing history" — unavoidable for these features |
+| `favicon` | TabVault ✅ | Show favicons from Chrome's local cache instead of fetching remote icons | none |
+| `contextMenus` | Watch Later ✅ | Right-click "Save to Watch Later" | none |
+| `activeTab` | Watch Later / Media / Tools ✅ | Temporary access to the current tab after a click, shortcut or context-menu action | none |
+| `scripting` | Media Boost / Tools ✅ | Inject content scripts on demand (activeTab) and register per-site scripts | none by itself |
+| `sessions` | Tab Manager ✅ | Recently closed tabs/windows (`chrome.sessions`) | combined with tabs |
+| `optional_host_permissions: ["https://*/*", "http://*/*"]` | Media Boost ✅ | Requested **per origin at runtime** only when the user turns on automatic apply for a remembered site. Never granted at install. | shown only when user opts in |
 
 Explicitly **not** requested: `<all_urls>` at install, `tabGroups`, `history`,
 `bookmarks`, `downloads`, `identity`, `webRequest`, `declarativeNetRequest`,
@@ -202,9 +217,12 @@ File: `src/background/service-worker.js` (`"type": "module"`).
   directly — same origin, no SW round-trip. The service worker uses the same
   repository for events that have no page: context-menu clicks, keyboard
   commands, and requests from content scripts.
-- Planned listeners by phase: `contextMenus.onClicked` (Watch Later),
-  `commands.onCommand` (Media Boost / quick save), `permissions.onAdded/
-  onRemoved` (sync registered media content scripts with granted origins).
+- Other listeners: `contextMenus.onClicked` (Watch Later / TabVault),
+  `commands.onCommand` (Watch Later, TabVault, Media Boost), and
+  `permissions.onAdded/onRemoved`, which keep the registered media content
+  script's `matches` equal to the granted origins.
+- Feedback for actions without a page (menu, shortcut) is a 2-second toolbar
+  badge: ✓ saved, ↻ already saved, ✕ failed, or the new speed.
 
 ---
 
@@ -226,8 +244,10 @@ is done from extension pages using tab metadata.
 - **Classic scripts, idempotent.** Each script guards with a
   `window.__browsekit*` flag so repeated injection is harmless, and runs in
   Chrome's isolated world (page JS cannot see our variables).
-- **Communication:** content → SW via `chrome.runtime.sendMessage`; popup →
-  content via `chrome.tabs.sendMessage` or `executeScript` return values.
+- **Communication:** the extension calls
+  `executeScript({ func: cmd => __browsekitMedia.run(cmd) })` and reads the
+  returned status per frame. Status comes back from every frame; commands then
+  go to the chosen frame only (playing media first, else the top frame).
   Content scripts never touch IndexedDB (different origin); per-site settings
   come from `chrome.storage.local`.
 - **Where scripts cannot run** (surfaced to the user, never hidden):
@@ -269,8 +289,12 @@ is done from extension pages using tab metadata.
   1. `commands` (manifest) — work on any page that allows injection; Chrome
      limits an extension to 4 suggested shortcuts, users can rebind in
      `chrome://extensions/shortcuts`.
-  2. In-page keys (e.g. `[`/`]` speed, `\` reset) — only on sites with persistent
-     access; ignored while typing in inputs/contenteditable.
+  2. In-page keys (`[`/`]` speed, `\` reset) — active wherever the script is
+     running (after using the popup/shortcut on that page, or automatically on
+     sites with granted access); ignored while typing in inputs/contenteditable.
+- **Site vs user speed changes:** a `ratechange` within 1 s of a real user
+  input is treated as the user using the site's own controls and adopted; other
+  resets are re-applied, and BrowseKit backs off after 30 fights in 5 s.
 - **Not reachable:** media inside cross-origin iframes unless that iframe's
   origin is also granted; closed shadow roots; media rendered by plugins/canvas.
 
@@ -312,9 +336,9 @@ opening saved URLs — i.e. normal browsing.
 | Phase | Scope | New permissions |
 | --- | --- | --- |
 | **0 Foundation** ✅ | Manifest, SW + router, IndexedDB layer + migrations, settings, theme, dashboard shell with all sections, popup shell, backup export/import, validator, unit tests, Chromium smoke test | `storage` |
-| 1 TabVault | Collections CRUD, save tab/window/all windows, open collection, search, rename/move/delete tabs, drag reorder, import/export (BrowseKit JSON + plain URL list) | `tabs`, `favicon` |
-| 2 Watch Later | Save page (popup + context menu + shortcut), list, search, watched toggle, open / open-and-remove / open all | `contextMenus`, `activeTab` |
-| 3 Tab Manager & Sessions | Search open tabs across windows, switch to tab, duplicate detection + close, recently closed, save/restore sessions | `sessions` |
-| 4 Quick Tools | Copy URL/title/both, clean tracking params (local rule list), word/char count + reading time (selection or page), local QR encoder, screenshot visible area, print | `scripting` |
-| 5 Media Boost | Content script, popup controls, custom speed, volume/boost, mute, seek, per-site memory with optional host permissions, commands + in-page keys | optional hosts |
+| 1 TabVault ✅ | Collections CRUD, save tab/window/all windows, open collection, search, rename/move/delete tabs, drag reorder, import/export (BrowseKit JSON + plain URL list) | `tabs`, `favicon` |
+| 2 Watch Later ✅ | Save page (popup + context menu + shortcut), list, search, watched toggle, open / open-and-remove / open all | `contextMenus`, `activeTab` |
+| 3 Tab Manager & Sessions ✅ | Search open tabs across windows, switch to tab, duplicate detection + close, recently closed, save/restore sessions | `sessions` |
+| 4 Quick Tools ✅ | Copy URL/title/both, clean tracking params (local rule list), word/char count + reading time (selection or page), local QR encoder, screenshot visible area, print | `scripting` |
+| 5 Media Boost ✅ | Content script, popup controls, custom speed, volume/boost, mute, seek, per-site memory with optional host permissions, commands + in-page keys | optional hosts |
 | 6 Polish | Accessibility pass, keyboard navigation, i18n (`_locales`), large-data performance, packaging script, store listing/privacy policy text | — |

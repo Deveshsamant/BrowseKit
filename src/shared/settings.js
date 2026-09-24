@@ -9,10 +9,37 @@
 export const SETTINGS_KEY = 'settings';
 
 export const THEMES = Object.freeze(['system', 'light', 'dark']);
+export const OPEN_TARGETS = Object.freeze(['current-window', 'new-window']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: 1,
   theme: 'system',
+  vault: Object.freeze({
+    /** Where "Open collection" puts the tabs. */
+    openIn: 'current-window',
+    /** Close tabs after saving them (OneTab-style). */
+    closeAfterSave: false,
+    /** Skip URLs already present in the target collection. */
+    skipDuplicates: true,
+    /** Collection preselected in the popup. */
+    lastCollectionId: null,
+  }),
+  watchLater: Object.freeze({
+    /** Mark items watched when opened from BrowseKit. */
+    markWatchedOnOpen: true,
+  }),
+  media: Object.freeze({
+    speedStep: 0.25,
+    seekStep: 10,
+    /** [ ] \ keys on sites with automatic access. */
+    inPageShortcuts: true,
+    /** Brief on-page indicator when speed/volume changes. */
+    showOverlay: true,
+  }),
+  privacy: Object.freeze({
+    /** Strip known tracking parameters from URLs saved to TabVault/Watch Later. */
+    cleanUrlsOnSave: false,
+  }),
 });
 
 /** @param {unknown} v */
@@ -36,14 +63,46 @@ export function deepMerge(base, patch) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {number} min
+ * @param {number} max
+ * @param {number} fallback
+ */
+function clampNumber(value, min, max, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+/** @param {unknown} value @param {boolean} fallback */
+const bool = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
+
+/**
  * Merge stored settings with defaults and coerce invalid values back to defaults.
  * @param {unknown} stored
  */
 export function normalizeSettings(stored) {
-  const merged = deepMerge(DEFAULT_SETTINGS, isPlainObject(stored) ? stored : {});
-  if (!THEMES.includes(merged.theme)) merged.theme = DEFAULT_SETTINGS.theme;
-  merged.schemaVersion = DEFAULT_SETTINGS.schemaVersion;
-  return merged;
+  const d = DEFAULT_SETTINGS;
+  // Merge onto a fresh copy: DEFAULT_SETTINGS is frozen and must never be mutated.
+  const s = deepMerge(JSON.parse(JSON.stringify(d)), isPlainObject(stored) ? stored : {});
+  for (const section of ['vault', 'watchLater', 'media', 'privacy']) {
+    if (!isPlainObject(s[section])) s[section] = { ...d[section] };
+  }
+  if (!THEMES.includes(s.theme)) s.theme = d.theme;
+  s.schemaVersion = d.schemaVersion;
+
+  if (!OPEN_TARGETS.includes(s.vault.openIn)) s.vault.openIn = d.vault.openIn;
+  s.vault.closeAfterSave = bool(s.vault.closeAfterSave, d.vault.closeAfterSave);
+  s.vault.skipDuplicates = bool(s.vault.skipDuplicates, d.vault.skipDuplicates);
+  if (typeof s.vault.lastCollectionId !== 'string') s.vault.lastCollectionId = null;
+
+  s.watchLater.markWatchedOnOpen = bool(s.watchLater.markWatchedOnOpen, d.watchLater.markWatchedOnOpen);
+
+  s.media.speedStep = clampNumber(s.media.speedStep, 0.05, 4, d.media.speedStep);
+  s.media.seekStep = clampNumber(s.media.seekStep, 1, 600, d.media.seekStep);
+  s.media.inPageShortcuts = bool(s.media.inPageShortcuts, d.media.inPageShortcuts);
+  s.media.showOverlay = bool(s.media.showOverlay, d.media.showOverlay);
+
+  s.privacy.cleanUrlsOnSave = bool(s.privacy.cleanUrlsOnSave, d.privacy.cleanUrlsOnSave);
+  return s;
 }
 
 /**

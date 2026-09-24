@@ -51,6 +51,21 @@ test('getSettings / updateSettings round-trip through a storage area', async () 
   assert.equal((await getSettings(area)).theme, 'dark');
 });
 
+test('normalizeSettings clamps and validates nested sections', () => {
+  const s = normalizeSettings({
+    vault: { openIn: 'somewhere', closeAfterSave: 'yes', lastCollectionId: 5 },
+    media: { speedStep: 99, seekStep: -3, inPageShortcuts: false },
+    privacy: 'broken',
+  });
+  assert.equal(s.vault.openIn, 'current-window');
+  assert.equal(s.vault.closeAfterSave, false);
+  assert.equal(s.vault.lastCollectionId, null);
+  assert.equal(s.media.speedStep, 4);
+  assert.equal(s.media.seekStep, 1);
+  assert.equal(s.media.inPageShortcuts, false);
+  assert.equal(s.privacy.cleanUrlsOnSave, false);
+});
+
 test('updateSettings rejects invalid theme values by falling back to default', async () => {
   const area = fakeArea({ [SETTINGS_KEY]: { theme: 'light' } });
   assert.equal((await updateSettings({ theme: 42 }, area)).theme, 'system');
