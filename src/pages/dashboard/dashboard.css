@@ -1,0 +1,244 @@
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: var(--bk-space-2);
+  z-index: 20;
+  padding: var(--bk-space-2) var(--bk-space-3);
+  background: var(--bk-surface);
+}
+
+.skip-link:focus {
+  top: var(--bk-space-2);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: var(--bk-space-4) var(--bk-space-3);
+  border-right: 1px solid var(--bk-border);
+  background: var(--bk-surface);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--bk-space-2);
+  padding: var(--bk-space-2) var(--bk-space-3) var(--bk-space-5);
+}
+
+.brand__name {
+  font-size: var(--bk-text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: var(--bk-space-3);
+  padding: var(--bk-space-2) var(--bk-space-3);
+  border-radius: var(--bk-radius-sm);
+  color: var(--bk-text-muted);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.nav a:hover {
+  background: var(--bk-surface-2);
+  color: var(--bk-text);
+}
+
+.nav a[aria-current='page'] {
+  background: var(--bk-accent-soft);
+  color: var(--bk-accent-strong);
+}
+
+.nav svg,
+.sidebar__footer svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 0;
+}
+
+.sidebar__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--bk-space-2);
+  margin-top: auto;
+  padding: var(--bk-space-3);
+  font-size: var(--bk-text-sm);
+}
+
+/* Main */
+.main {
+  width: 100%;
+  max-width: 1040px;
+  padding: var(--bk-space-6) var(--bk-space-6) 80px;
+}
+
+.main:focus {
+  outline: none;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--bk-space-3);
+  margin-bottom: var(--bk-space-5);
+}
+
+.page-header h1 {
+  font-size: var(--bk-text-2xl);
+  letter-spacing: -0.02em;
+}
+
+.page-header p {
+  margin-top: var(--bk-space-1);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bk-space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--bk-space-4);
+}
+
+/* Home */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bk-space-1);
+  color: inherit;
+  text-decoration: none;
+}
+
+.stat:hover {
+  border-color: var(--bk-accent);
+}
+
+.stat__value {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat > * + * {
+  margin-top: 0;
+}
+
+.welcome {
+  border-color: var(--bk-accent);
+  background: var(--bk-accent-soft);
+}
+
+.privacy-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--bk-space-2) var(--bk-space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.privacy-list li {
+  display: flex;
+  gap: var(--bk-space-2);
+}
+
+.privacy-list li::before {
+  content: '✓';
+  color: var(--bk-success);
+  font-weight: 700;
+}
+
+/* Settings */
+.setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bk-space-3);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--bk-space-1) var(--bk-space-5);
+}
+
+.kv dt {
+  color: var(--bk-text-muted);
+}
+
+.kv dd {
+  margin: 0;
+}
+
+.error-list {
+  padding-left: 1.2em;
+  color: var(--bk-danger);
+}
+
+/* Coming soon */
+.phase-note {
+  display: flex;
+  align-items: center;
+  gap: var(--bk-space-2);
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--bk-space-4);
+}
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .nav {
+    flex-flow: row wrap;
+  }
+
+  .sidebar__footer {
+    display: none;
+  }
+
+  .main {
+    padding: var(--bk-space-5) var(--bk-space-4) 80px;
+  }
+}

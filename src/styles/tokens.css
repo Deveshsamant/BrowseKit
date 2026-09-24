@@ -1,0 +1,77 @@
+/* Design tokens. Light by default; dark via system preference or data-theme. */
+:root {
+  color-scheme: light;
+  --bk-bg: #f6f7f9;
+  --bk-surface: #ffffff;
+  --bk-surface-2: #f0f2f5;
+  --bk-border: #dfe3e8;
+  --bk-text: #16191d;
+  --bk-text-muted: #5b6470;
+  --bk-accent: #4f46e5;
+  --bk-accent-strong: #4338ca;
+  --bk-accent-soft: #eceafd;
+  --bk-on-accent: #ffffff;
+  --bk-danger: #c62828;
+  --bk-danger-soft: #fdecec;
+  --bk-success: #1f7a4d;
+  --bk-focus: #4f46e5;
+  --bk-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+
+  --bk-radius-sm: 6px;
+  --bk-radius: 10px;
+  --bk-radius-lg: 14px;
+  --bk-space-1: 4px;
+  --bk-space-2: 8px;
+  --bk-space-3: 12px;
+  --bk-space-4: 16px;
+  --bk-space-5: 24px;
+  --bk-space-6: 32px;
+
+  --bk-font: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', sans-serif;
+  --bk-font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --bk-text-sm: 12px;
+  --bk-text-md: 14px;
+  --bk-text-lg: 16px;
+  --bk-text-xl: 20px;
+  --bk-text-2xl: 26px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bk-bg: #111316;
+    --bk-surface: #1a1d21;
+    --bk-surface-2: #23272d;
+    --bk-border: #32373f;
+    --bk-text: #e8eaed;
+    --bk-text-muted: #9aa3ae;
+    --bk-accent: #8b85ff;
+    --bk-accent-strong: #a5a0ff;
+    --bk-accent-soft: #2a2850;
+    --bk-on-accent: #0f0e1f;
+    --bk-danger: #ff6b6b;
+    --bk-danger-soft: #3a1c1f;
+    --bk-success: #4ccf8d;
+    --bk-focus: #a5a0ff;
+    --bk-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bk-bg: #111316;
+  --bk-surface: #1a1d21;
+  --bk-surface-2: #23272d;
+  --bk-border: #32373f;
+  --bk-text: #e8eaed;
+  --bk-text-muted: #9aa3ae;
+  --bk-accent: #8b85ff;
+  --bk-accent-strong: #a5a0ff;
+  --bk-accent-soft: #2a2850;
+  --bk-on-accent: #0f0e1f;
+  --bk-danger: #ff6b6b;
+  --bk-danger-soft: #3a1c1f;
+  --bk-success: #4ccf8d;
+  --bk-focus: #a5a0ff;
+  --bk-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+}
