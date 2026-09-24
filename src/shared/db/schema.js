@@ -6,7 +6,7 @@
  */
 
 export const DB_NAME = 'browsekit';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export const STORES = Object.freeze({
   COLLECTIONS: 'collections',
@@ -14,6 +14,7 @@ export const STORES = Object.freeze({
   WATCH_LATER: 'watchLater',
   SESSIONS: 'sessions',
   META: 'meta',
+  SNOOZED: 'snoozed',
 });
 
 /** keyPath per store, used by backup validation. */
@@ -23,6 +24,7 @@ export const KEY_PATHS = Object.freeze({
   [STORES.WATCH_LATER]: 'id',
   [STORES.SESSIONS]: 'id',
   [STORES.META]: 'key',
+  [STORES.SNOOZED]: 'id',
 });
 
 export const STORE_NAMES = Object.freeze(Object.values(STORES));
@@ -55,5 +57,12 @@ export const MIGRATIONS = {
 
     // { key, value }
     db.createObjectStore(STORES.META, { keyPath: 'key' });
+  },
+  2(db) {
+    // Tab snooze: { id, url, title, wakeAt, createdAt }
+    const snoozed = db.createObjectStore(STORES.SNOOZED, { keyPath: 'id' });
+    snoozed.createIndex('wakeAt', 'wakeAt');
+    // Other v2 additions are optional fields on existing records and need no migration:
+    // vaultTabs { note, tags }, collections { starred }, sessions { kind: 'manual' | 'autosave' }.
   },
 };

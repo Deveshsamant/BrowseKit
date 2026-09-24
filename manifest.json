@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "BrowseKit",
   "short_name": "BrowseKit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Privacy-first browser toolkit: tab collections, watch later, media controls and quick tools. All data stays on your device.",
-  "minimum_chrome_version": "116",
+  "minimum_chrome_version": "121",
   "icons": {
     "16": "assets/icons/icon16.png",
     "32": "assets/icons/icon32.png",
@@ -20,6 +20,9 @@
     }
   },
   "options_page": "src/pages/dashboard/dashboard.html",
+  "side_panel": {
+    "default_path": "src/pages/sidepanel/sidepanel.html"
+  },
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
@@ -31,7 +34,9 @@
     "contextMenus",
     "activeTab",
     "scripting",
-    "sessions"
+    "sessions",
+    "alarms",
+    "sidePanel"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -79,6 +84,18 @@
     },
     "save-tab-to-vault": {
       "description": "Save the current tab to the last-used TabVault collection"
+    },
+    "open-palette": {
+      "description": "Search everything (tabs, TabVault, Watch Later, sessions, actions)"
+    },
+    "snooze-tab": {
+      "description": "Snooze the current tab until tomorrow morning"
+    },
+    "media-pip": {
+      "description": "Media: picture-in-picture"
+    },
+    "free-memory": {
+      "description": "Suspend all background tabs to free memory"
     }
   },
   "content_security_policy": {

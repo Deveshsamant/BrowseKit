@@ -96,13 +96,15 @@ worker, dashboard and popup all share one database. Content scripts run in the
 *page's* origin and **cannot** reach it — they talk to the service worker by
 message instead.
 
-Schema v1 (`src/shared/db/schema.js`):
+Schema v2 (`src/shared/db/schema.js`; v2 added `snoozed`, plus optional
+fields `vaultTabs.note/tags`, `collections.starred`, `sessions.kind`):
 
 | Store | keyPath | Indexes | Record |
 | --- | --- | --- | --- |
 | `collections` | `id` | `sortOrder`, `updatedAt` | `{ id, name, color, sortOrder, createdAt, updatedAt }` |
 | `vaultTabs` | `id` | `collectionId`, `url`, `byCollectionOrder` = `[collectionId, sortOrder]` | `{ id, collectionId, url, title, sortOrder, createdAt, updatedAt }` |
 | `watchLater` | `id` | `url`, `addedAt`, `watched` | `{ id, url, title, watched: 0\|1, addedAt, watchedAt }` |
+| `snoozed` (v2) | `id` | `wakeAt` | `{ id, url, title, wakeAt, createdAt }` |
 | `sessions` | `id` | `createdAt` | `{ id, name, createdAt, windows: [{ tabs: [{ url, title, pinned }] }] }` |
 | `meta` | `key` | — | `{ key, value }` (install date, last backup, etc.) |
 
@@ -163,6 +165,8 @@ make host access *optional* and per-site.
 | `contextMenus` | Watch Later ✅ | Right-click "Save to Watch Later" | none |
 | `activeTab` | Watch Later / Media / Tools ✅ | Temporary access to the current tab after a click, shortcut or context-menu action | none |
 | `scripting` | Media Boost / Tools ✅ | Inject content scripts on demand (activeTab) and register per-site scripts | none by itself |
+| `alarms` | v0.3 ✅ | One-minute tick for snooze wake-ups, idle-tab handling and session autosave | none |
+| `sidePanel` | v0.3 ✅ | Optional side-panel view of the popup tools | none |
 | `sessions` | Tab Manager ✅ | Recently closed tabs/windows (`chrome.sessions`) | combined with tabs |
 | `optional_host_permissions: ["https://*/*", "http://*/*"]` | Media Boost ✅ | Requested **per origin at runtime** only when the user turns on automatic apply for a remembered site. Never granted at install. | shown only when user opts in |
 
@@ -342,3 +346,35 @@ opening saved URLs — i.e. normal browsing.
 | 4 Quick Tools ✅ | Copy URL/title/both, clean tracking params (local rule list), word/char count + reading time (selection or page), local QR encoder, screenshot visible area, print | `scripting` |
 | 5 Media Boost ✅ | Content script, popup controls, custom speed, volume/boost, mute, seek, per-site memory with optional host permissions, commands + in-page keys | optional hosts |
 | 6 Polish | Accessibility pass, keyboard navigation, i18n (`_locales`), large-data performance, packaging script, store listing/privacy policy text | — |
+
+
+---
+
+## 11. v0.3 additions
+
+- **One alarm drives scheduled work** (`src/background/tick.js`): a
+  one-minute `bk-tick` alarm wakes the worker; each step is idempotent and
+  reads state from storage — snooze wake-ups (`snoozed` store), auto-close
+  idle tabs into the "Auto-closed tabs" collection, auto-suspend
+  (`chrome.tabs.discard`, using Chrome's `tab.lastAccessed`, Chrome 121+),
+  and session autosave (skipped when the window/tab fingerprint is unchanged).
+  Missed ticks (browser closed) simply catch up on the next one.
+- **Search everything** (`src/features/search/search-model.js` pure ranking;
+  `src/pages/palette/palette-ui.js` UI) is shared by the popup search box,
+  the side panel, the dashboard's Ctrl+K dialog and a standalone palette
+  window opened by the `open-palette` command.
+- **Side panel** (`src/pages/sidepanel/sidepanel.html`) reuses the popup UI
+  with `data-mode="sidepanel"` and follows tab switches. Settings can make the
+  toolbar button open the side panel (`chrome.sidePanel.setPanelBehavior` +
+  empty popup), applied by `src/background/action.js`.
+- **Reader view** (`src/features/tools/reader.js`) extracts text blocks in
+  the page on demand, stores them in `chrome.storage.session` (memory only)
+  and renders them as text in `src/pages/reader/`. No images or embeds are
+  loaded.
+- **Media Boost** also keeps resume positions (`media.positions` in
+  `chrome.storage.local`, media ≥ 2 min, capped at 300 pages), A–B loops,
+  picture-in-picture and a local "time saved" counter (`stats`).
+- **Encrypted backups** (`src/shared/crypto-backup.js`): PBKDF2-SHA-256
+  (310k iterations) → AES-256-GCM via WebCrypto; the password is never stored.
+- **Policies** are listed live by `npm run policies` (see `docs/POLICIES.md`);
+  `npm run package` builds the Web Store zip after validation.

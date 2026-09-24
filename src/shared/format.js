@@ -44,3 +44,16 @@ export function isoDay(date = new Date()) {
   const pad = (/** @type {number} */ n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
+
+/**
+ * Human duration from seconds: "45 s", "12 min", "3 h 5 min".
+ * @param {number} seconds
+ */
+export function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+}

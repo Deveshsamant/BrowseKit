@@ -48,3 +48,37 @@ export async function captureVisible(windowId) {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   return new Blob([bytes], { type: 'image/png' });
 }
+
+/**
+ * All http(s) links on the page (or in the selection), de-duplicated.
+ * @param {number} tabId
+ * @returns {Promise<{ url: string, title: string }[]>}
+ */
+export async function extractLinks(tabId) {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const sel = globalThis.getSelection?.();
+      let anchors = [...document.querySelectorAll('a[href]')];
+      if (sel && !sel.isCollapsed && sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        const inSel = anchors.filter((a) => range.intersectsNode(a));
+        if (inSel.length) anchors = inSel;
+      }
+      const seen = new Set();
+      const out = [];
+      for (const a of anchors) {
+        const url = /** @type {HTMLAnchorElement} */ (a).href;
+        if (!/^https?:/i.test(url)) continue;
+        const key = url.split('#')[0];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const title = (a.textContent || a.getAttribute('title') || a.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+        out.push({ url, title: title.slice(0, 300) || url });
+        if (out.length >= 2000) break;
+      }
+      return out;
+    },
+  });
+  return result?.result ?? [];
+}

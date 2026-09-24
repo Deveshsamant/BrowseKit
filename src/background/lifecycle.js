@@ -7,7 +7,9 @@ import { openDatabase } from '../shared/db/database.js';
 import { getMeta, setMeta } from '../shared/db/repository.js';
 import { ensureSettings } from '../shared/settings.js';
 import { syncRegisteredMediaScript } from '../features/media/media-sites.js';
+import { applyActionBehavior } from './action.js';
 import { createMenus } from './menus.js';
+import { ensureTickAlarm } from './tick.js';
 
 /**
  * @param {chrome.runtime.InstalledDetails} details
@@ -22,8 +24,16 @@ export async function handleInstalled(details) {
   await setMeta('appVersion', chrome.runtime.getManifest().version);
   await createMenus();
   await syncRegisteredMediaScript();
+  await ensureTickAlarm();
+  await applyActionBehavior();
 
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     await chrome.tabs.create({ url: `${dashboardUrl(ROUTES.HOME)}?welcome=1` });
   }
+}
+
+/** Browser start: make sure scheduled work and the toolbar behaviour are in place. */
+export async function handleStartup() {
+  await ensureTickAlarm();
+  await applyActionBehavior();
 }

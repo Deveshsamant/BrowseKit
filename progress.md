@@ -2,9 +2,9 @@
 
 Status legend: ✅ done · 🟡 partial · ⬜ not started
 
-**Current version: 0.2.0.** Verified by:
-- `npm run check`: policy validator plus 53 unit tests.
-- `npm run smoke`: 28 end-to-end checks in real Chromium, run in two phases (see "Testing").
+**Current version: 0.3.0.** Verified by:
+- `npm run check`: policy validator plus 75 unit tests.
+- `npm run smoke`: 41 end-to-end checks in real Chromium, run in two phases (see "Testing").
 
 ## Phase 0 — Foundation ✅
 
@@ -83,11 +83,43 @@ The manifest, service worker, message router, IndexedDB schema v1, settings, the
 | Performance with very large vaults (10k+ tabs) | ⬜ | Views re-render whole lists; needs virtualisation if users hit it. |
 | Packaging script / store listing / privacy policy text | ⬜ | |
 
+## v0.3 — 20 growth features ✅
+
+Picked from what users praise most in OneTab, Session Buddy, Workona, Tab Wrangler and Video Speed Controller, plus gaps reviewers keep citing (search, snapshots, automation). All local.
+
+| # | Feature | Status | Notes / honest limits |
+| --- | --- | --- | --- |
+| 1 | Side panel mode | ✅ | Same tools as the popup, follows tab switches. Setting: toolbar button opens popup or side panel. Media/page tools in the side panel still need activeTab or site access. |
+| 2 | Search everything | ✅ | Popup search box, side panel, dashboard Ctrl+K, and a global "Search everything" command (no default key). Covers open tabs, TabVault (incl. #tags and notes), Watch Later, sessions, snoozed tabs and 20 actions. |
+| 3 | Tab snooze | ✅ | 6 presets + custom time. Reopened by the alarm tick; if the browser was closed at wake time, the tab opens shortly after start-up. |
+| 4 | Auto-suspend idle tabs | ✅ | Off by default. Never touches active, pinned or audible tabs, or protected sites. Discarded tabs reload when opened, and unsaved form input may be lost (the UI says so). |
+| 5 | Auto-close idle tabs | ✅ | Off by default. Closed tabs go to the "Auto-closed tabs" collection. Never empties a window. |
+| 6 | Session autosave | ✅ | Every 30 min by default, only when something changed; keeps the last 10. |
+| 7 | Workspaces | ✅ | "Switch" opens a session and closes everything else, after autosaving the current state. |
+| 8 | Tidy tabs | ✅ | Sort by site (pinned tabs stay first), merge windows, free memory, close duplicates. |
+| 9 | Tags & notes | ✅ | Edit dialog; `#tag` search; tag cloud; kept in JSON export/import. |
+| 10 | Starred collections & sorting | ✅ | Starred collections stay on top. Sort by title, site, newest or oldest. |
+| 11 | Bookmarks HTML | ✅ | Export (per collection or all) and import (any browser's bookmarks file, nested folders). |
+| 12 | Reader view | ✅ | Text-only article view with font, width and sepia options. Results vary by site; images and embeds are left out. |
+| 13 | Link extractor | ✅ | All links, or only those in the selection. Copy them or save to a new collection. |
+| 14 | Developer & text tools | ✅ | JSON, Base64, URL, SHA hashes, UUID, passwords, case conversion, timestamps. |
+| 15 | Encrypted backups | ✅ | AES-256-GCM with PBKDF2. The password is never stored and can't be recovered. |
+| 16 | Backup reminder | ✅ | Home banner and popup banner after N days (30 by default); 0 turns it off. |
+| 17 | Video resume position | ✅ | Media of 2+ minutes, on pages where Media Boost runs. Progress bars in Watch Later. Single-page apps that don't change the URL may not resume. |
+| 18 | A–B loop + picture-in-picture | ✅ | PiP needs a recent click on the page, and sites can disable it; the error says so. |
+| 19 | Insights | ✅ | Time saved by faster playback, tabs suspended, duplicates closed, auto-closed, snoozed. All counted locally. |
+| 20 | Onboarding & personalisation | ✅ | Get-started checklist that completes itself, `?` shortcut sheet, 6 accent colours, compact density, greeting. |
+| + | Release readiness | ✅ | `npm run package` (reproducible zip), `PRIVACY.md`, `docs/store-listing.md`, `README.md`, `docs/POLICIES.md` + `npm run policies`. |
+
+New permissions: `alarms` and `sidePanel` (neither shows an install warning). Schema v2 adds a `snoozed` store. Minimum Chrome version is now 121, needed for `tab.lastAccessed`.
+
 ## Testing
 
 - **Unit (node:test):** settings, messaging, backup, validator, URL cleaning and duplicates, text stats, QR (Reed–Solomon test vector, capacity table, structure), TabVault model (dedupe, search, import/export formats), open-tab duplicates, sessions, Watch Later filter, and frame selection.
 - **Smoke phase A (real manifest):** install and permissions; every dashboard view; the TabVault flows (save, create, rename, move, delete, keyboard reorder, OneTab import, opening without tab groups); Watch Later flows; context menu and command registration; duplicates, recently closed and sessions; the Tools view; settings and backup round-trip; the popup Save, Tabs and Tools panels; CSP network blocking (checked against a local server); no `chrome://extensions` errors or warnings.
 - **Smoke phase B (temporary copy that grants the test server as a host):** popup Media Boost (presets, custom speed, clamping); boost on same-origin media and refusal on cross-origin media; speed re-apply, seek, mute and reset; the registered script auto-applying a remembered site's speed plus the `]` key; popup word count and reading time.
+- **v0.3 in smoke:** snooze wake-up via the alarm, autosave (including skip-when-unchanged), free memory and merge windows, Ctrl+K and palette window, tags/notes/star/#tag search, bookmarks HTML import, Watch Later progress, developer tools, accent colour, encrypted backup export → import with password, Get started + `?` sheet, side panel page, A–B loop, PiP (supported or an honest error), resume after reload plus time saved, reader view and link extraction.
+- **Free memory in automation:** Playwright tears down the browser when a tab it controls is discarded. The smoke test therefore stubs only the final `chrome.tabs.discard` call; tab selection, exclusions and stats run for real.
 - **Not automatable:**
   - The real `activeTab` grant, which comes from a user clicking the toolbar icon.
   - Accepting Chrome's permission prompt.

@@ -10,6 +10,9 @@ export const SETTINGS_KEY = 'settings';
 
 export const THEMES = Object.freeze(['system', 'light', 'dark']);
 export const OPEN_TARGETS = Object.freeze(['current-window', 'new-window']);
+export const ACCENTS = Object.freeze(['indigo', 'blue', 'teal', 'green', 'rose', 'amber']);
+export const DENSITIES = Object.freeze(['comfortable', 'compact']);
+export const ACTION_TARGETS = Object.freeze(['popup', 'sidepanel']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: 1,
@@ -35,6 +38,33 @@ export const DEFAULT_SETTINGS = Object.freeze({
     inPageShortcuts: true,
     /** Brief on-page indicator when speed/volume changes. */
     showOverlay: true,
+    /** Resume videos where you left off (sites where Media Boost runs). */
+    resumePlayback: true,
+  }),
+  tabs: Object.freeze({
+    /** Discard (unload) background tabs idle this long; 0 = off. */
+    autoSuspendMinutes: 0,
+    /** Close background tabs idle this long into the "Auto-closed" collection; 0 = off. */
+    autoCloseMinutes: 0,
+    /** Hostnames never suspended or auto-closed. */
+    neverTouchHosts: Object.freeze([]),
+  }),
+  sessions: Object.freeze({
+    /** Snapshot all windows every N minutes when something changed; 0 = off. */
+    autosaveMinutes: 30,
+    /** Autosaves kept (oldest removed first). */
+    autosaveKeep: 10,
+  }),
+  backup: Object.freeze({
+    /** Remind to export a backup after N days; 0 = never. */
+    remindDays: 30,
+  }),
+  ui: Object.freeze({
+    accent: 'indigo',
+    density: 'comfortable',
+    /** What the toolbar button opens. */
+    actionOpens: 'popup',
+    onboardingDismissed: false,
   }),
   privacy: Object.freeze({
     /** Strip known tracking parameters from URLs saved to TabVault/Watch Later. */
@@ -83,7 +113,7 @@ export function normalizeSettings(stored) {
   const d = DEFAULT_SETTINGS;
   // Merge onto a fresh copy: DEFAULT_SETTINGS is frozen and must never be mutated.
   const s = deepMerge(JSON.parse(JSON.stringify(d)), isPlainObject(stored) ? stored : {});
-  for (const section of ['vault', 'watchLater', 'media', 'privacy']) {
+  for (const section of ['vault', 'watchLater', 'media', 'privacy', 'tabs', 'sessions', 'backup', 'ui']) {
     if (!isPlainObject(s[section])) s[section] = { ...d[section] };
   }
   if (!THEMES.includes(s.theme)) s.theme = d.theme;
@@ -102,6 +132,22 @@ export function normalizeSettings(stored) {
   s.media.showOverlay = bool(s.media.showOverlay, d.media.showOverlay);
 
   s.privacy.cleanUrlsOnSave = bool(s.privacy.cleanUrlsOnSave, d.privacy.cleanUrlsOnSave);
+  s.media.resumePlayback = bool(s.media.resumePlayback, d.media.resumePlayback);
+
+  s.tabs.autoSuspendMinutes = Math.round(clampNumber(s.tabs.autoSuspendMinutes, 0, 1440, 0));
+  s.tabs.autoCloseMinutes = Math.round(clampNumber(s.tabs.autoCloseMinutes, 0, 10080, 0));
+  s.tabs.neverTouchHosts = Array.isArray(s.tabs.neverTouchHosts)
+    ? [...new Set(s.tabs.neverTouchHosts.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().toLowerCase()))].slice(0, 200)
+    : [];
+
+  s.sessions.autosaveMinutes = Math.round(clampNumber(s.sessions.autosaveMinutes, 0, 1440, d.sessions.autosaveMinutes));
+  s.sessions.autosaveKeep = Math.round(clampNumber(s.sessions.autosaveKeep, 1, 50, d.sessions.autosaveKeep));
+  s.backup.remindDays = Math.round(clampNumber(s.backup.remindDays, 0, 365, d.backup.remindDays));
+
+  if (!ACCENTS.includes(s.ui.accent)) s.ui.accent = d.ui.accent;
+  if (!DENSITIES.includes(s.ui.density)) s.ui.density = d.ui.density;
+  if (!ACTION_TARGETS.includes(s.ui.actionOpens)) s.ui.actionOpens = d.ui.actionOpens;
+  s.ui.onboardingDismissed = bool(s.ui.onboardingDismissed, d.ui.onboardingDismissed);
   return s;
 }
 

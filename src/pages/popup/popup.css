@@ -136,3 +136,85 @@ body {
 .toast {
   bottom: var(--bk-space-3);
 }
+
+/* Search everything */
+.popup-search {
+  padding: var(--bk-space-2) var(--bk-space-3) 0;
+  background: var(--bk-surface);
+}
+
+.search-all {
+  min-height: 36px;
+}
+
+.palette--embedded {
+  display: none;
+  padding: var(--bk-space-2) var(--bk-space-2) var(--bk-space-3);
+}
+
+.palette--embedded .palette__list {
+  max-height: 440px;
+}
+
+body.is-searching .palette--embedded {
+  display: flex;
+}
+
+body.is-searching #banner,
+body.is-searching #page-card,
+body.is-searching #panel-tabs,
+body.is-searching #panel {
+  display: none;
+}
+
+#banner:not(:empty) {
+  padding: var(--bk-space-2) var(--bk-space-3) 0;
+  background: var(--bk-surface);
+}
+
+/* Snooze */
+.snooze-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--bk-space-1);
+}
+
+.snooze-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px var(--bk-space-2);
+  border: 1px solid var(--bk-border);
+  border-radius: var(--bk-radius-sm);
+  background: var(--bk-surface);
+  color: var(--bk-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.snooze-btn:hover {
+  border-color: var(--bk-accent);
+  background: var(--bk-accent-soft);
+}
+
+.snooze-btn__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.snooze-btn__hint {
+  color: var(--bk-text-muted);
+  font-size: 11px;
+}
+
+/* Side panel: fill the panel width */
+body[data-mode='sidepanel'] {
+  width: auto;
+  max-height: none;
+  min-height: 100vh;
+}
+
+body[data-mode='sidepanel'] .palette--embedded .palette__list {
+  max-height: none;
+}

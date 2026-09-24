@@ -6,7 +6,7 @@ import { h, mount, toast } from '../../../shared/dom.js';
 import { formatNumber, isoDay } from '../../../shared/format.js';
 import { getSettings } from '../../../shared/settings.js';
 import { openTabs } from '../../../shared/tabs.js';
-import { confirmDialog, debounce, emptyState, errorMessage, favicon, promptDialog, selectDialog } from '../../../shared/ui.js';
+import { confirmDialog, debounce, emptyState, errorMessage, favicon, formDialog, promptDialog, selectDialog } from '../../../shared/ui.js';
 import { hostOf } from '../../../shared/urls.js';
 import { saveTabsToVault } from '../../../features/vault/save.js';
 import {
@@ -18,15 +18,18 @@ import {
   moveTabs,
   reorderCollections,
   reorderTabs,
+  sortTabs,
   updateCollection,
   updateTab,
 } from '../../../features/vault/vault.js';
 import {
   COLLECTION_COLORS,
+  exportBookmarksHtml,
   exportUrlList,
   exportVaultJson,
   parseVaultImport,
   searchTabs,
+  tagCounts,
 } from '../../../features/vault/vault-model.js';
 import { downloadFile, readFileAsText } from '../../../shared/files.js';
 
@@ -59,7 +62,7 @@ export async function render(root, { params }) {
   });
   const fileInput = h('input', {
     type: 'file',
-    accept: '.json,.txt,application/json,text/plain',
+    accept: '.json,.txt,.html,.htm,application/json,text/plain,text/html',
     class: 'visually-hidden',
     onChange: () => importFromFile(),
   });
@@ -116,6 +119,7 @@ export async function render(root, { params }) {
             },
             h('span', { class: `dot dot--${c.color}`, 'aria-hidden': 'true' }),
             h('span', { class: 'collection-item__name' }, c.name),
+            c.starred && h('span', { class: 'star', 'aria-label': 'Starred' }, '★'),
             h('span', { class: 'collection-item__count' }, formatNumber(count)),
           ),
         );
@@ -123,10 +127,24 @@ export async function render(root, { params }) {
         return item;
       }),
     );
+    const tags = tagCounts(data.tabs).slice(0, 16);
     mount(
       sidebar,
       data.collections.length ? list : h('p', { class: 'muted small' }, 'No collections yet.'),
       h('button', { class: 'btn btn--block', type: 'button', onClick: newCollection }, '+ New collection'),
+      tags.length > 0 &&
+        h(
+          'div',
+          { class: 'tag-cloud' },
+          h('p', { class: 'field__label' }, 'Tags'),
+          h(
+            'div',
+            { class: 'chip-row' },
+            tags.map(([tag, n]) =>
+              h('button', { class: 'chip chip--tag', type: 'button', onClick: () => { search.value = `#${tag}`; state.query = search.value; renderMain(); } }, `#${tag}`, h('span', { class: 'muted' }, ` ${n}`)),
+            ),
+          ),
+        ),
     );
   }
 
@@ -214,6 +232,17 @@ export async function render(root, { params }) {
         { class: 'collection-head' },
         h('span', { class: `dot dot--lg dot--${collection.color}`, 'aria-hidden': 'true' }),
         h('h2', { class: 'collection-head__title' }, collection.name),
+        h(
+          'button',
+          {
+            class: `icon-btn star-btn${collection.starred ? ' is-on' : ''}`,
+            type: 'button',
+            'aria-pressed': String(!!collection.starred),
+            title: collection.starred ? 'Unstar (starred collections stay at the top)' : 'Star (keeps it at the top)',
+            onClick: () => updateCollection(collection.id, { starred: !collection.starred }).catch(fail),
+          },
+          collection.starred ? '★' : '☆',
+        ),
         h('span', { class: 'badge badge--muted' }, `${formatNumber(tabs.length)} tab${tabs.length === 1 ? '' : 's'}`),
       ),
       h(
@@ -223,6 +252,24 @@ export async function render(root, { params }) {
         h('button', { class: 'btn', type: 'button', disabled: !tabs.length, onClick: () => openSome(tabs, true) }, 'Open in new window'),
         h('button', { class: 'btn', type: 'button', onClick: () => rename(collection) }, 'Rename'),
         colorSelect,
+        h(
+          'select',
+          {
+            class: 'btn select',
+            'aria-label': 'Sort tabs',
+            disabled: tabs.length < 2,
+            onChange: (e) => {
+              const by = e.target.value;
+              e.target.value = '';
+              if (by) sortTabs(collection.id, by).then(() => toast('Sorted.'), fail);
+            },
+          },
+          h('option', { value: '' }, 'Sort…'),
+          h('option', { value: 'title' }, 'By title'),
+          h('option', { value: 'site' }, 'By site'),
+          h('option', { value: 'newest' }, 'Newest first'),
+          h('option', { value: 'oldest' }, 'Oldest first'),
+        ),
         h('button', { class: 'btn', type: 'button', disabled: !tabs.length, onClick: () => exportOne(collection) }, 'Export'),
         h('button', { class: 'btn btn--danger', type: 'button', onClick: () => removeCollection(collection) }, 'Delete'),
       ),
@@ -290,7 +337,8 @@ export async function render(root, { params }) {
           },
         },
         h('span', { class: 'row__title' }, tab.title),
-        h('span', { class: 'row__sub' }, hostOf(tab.url)),
+        h('span', { class: 'row__sub' }, hostOf(tab.url), (tab.tags ?? []).map((t) => h('span', { class: 'tag' }, `#${t}`))),
+        tab.note && h('span', { class: 'row__note' }, tab.note),
       ),
       h(
         'span',
@@ -432,11 +480,16 @@ export async function render(root, { params }) {
   }
 
   async function editTab(tab) {
-    const title = await promptDialog({ title: 'Edit saved tab', label: 'Title', value: tab.title });
-    if (title === null) return;
-    const url = await promptDialog({ title: 'Edit saved tab', label: 'URL', value: tab.url });
-    if (url === null) return;
-    updateTab(tab.id, { title, url }).catch(fail);
+    const values = await formDialog({
+      title: 'Edit saved tab',
+      fields: [
+        { name: 'title', label: 'Title', value: tab.title, required: true },
+        { name: 'url', label: 'URL', value: tab.url, type: 'url', required: true },
+        { name: 'tags', label: 'Tags', value: (tab.tags ?? []).join(', '), placeholder: 'research, read later', hint: 'Comma-separated. Search with #tag.' },
+        { name: 'note', label: 'Note', value: tab.note ?? '', type: 'textarea', placeholder: 'Why you saved it…' },
+      ],
+    });
+    if (values) updateTab(tab.id, values).catch(fail);
   }
 
   async function moveDialog(ids) {
@@ -503,9 +556,19 @@ export async function render(root, { params }) {
     }
   }
 
-  function exportAll() {
+  async function exportAll() {
     if (!data.collections.length) return toast('Nothing to export yet.');
-    downloadFile(`browsekit-tabvault-${isoDay()}.json`, JSON.stringify(exportVaultJson(data.collections, data.tabsByCollection), null, 2), 'application/json');
+    const format = await selectDialog({
+      title: 'Export all collections',
+      label: 'Format',
+      options: [
+        { value: 'json', label: 'BrowseKit JSON (re-importable, keeps titles, tags and notes)' },
+        { value: 'html', label: 'Bookmarks file (.html) — import into any browser' },
+      ],
+      confirmLabel: 'Export',
+    });
+    if (format === 'html') downloadFile(`browsekit-bookmarks-${isoDay()}.html`, exportBookmarksHtml(data.collections, data.tabsByCollection), 'text/html');
+    else if (format === 'json') downloadFile(`browsekit-tabvault-${isoDay()}.json`, JSON.stringify(exportVaultJson(data.collections, data.tabsByCollection), null, 2), 'application/json');
   }
 
   async function exportOne(collection) {
@@ -515,12 +578,15 @@ export async function render(root, { params }) {
       options: [
         { value: 'json', label: 'BrowseKit JSON (re-importable, keeps titles)' },
         { value: 'txt', label: 'Plain URL list (.txt)' },
+        { value: 'html', label: 'Bookmarks file (.html) — import into any browser' },
       ],
       confirmLabel: 'Export',
     });
     if (!format) return;
     const safe = collection.name.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'collection';
-    if (format === 'json') {
+    if (format === 'html') {
+      downloadFile(`${safe}-bookmarks-${isoDay()}.html`, exportBookmarksHtml([collection], data.tabsByCollection), 'text/html');
+    } else if (format === 'json') {
       downloadFile(`${safe}-${isoDay()}.json`, JSON.stringify(exportVaultJson([collection], data.tabsByCollection), null, 2), 'application/json');
     } else {
       downloadFile(`${safe}-${isoDay()}.txt`, exportUrlList([collection], data.tabsByCollection), 'text/plain');

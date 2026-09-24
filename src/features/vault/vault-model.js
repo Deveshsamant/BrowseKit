@@ -6,14 +6,16 @@
  */
 import { duplicateKey, isSaveableUrl } from '../../shared/urls.js';
 
-/** @typedef {{ id: string, name: string, color: string, sortOrder: number, createdAt: number, updatedAt: number }} Collection */
-/** @typedef {{ id: string, collectionId: string, url: string, title: string, sortOrder: number, createdAt: number, updatedAt: number }} VaultTab */
+/** @typedef {{ id: string, name: string, color: string, sortOrder: number, createdAt: number, updatedAt: number, starred?: boolean }} Collection */
+/** @typedef {{ id: string, collectionId: string, url: string, title: string, sortOrder: number, createdAt: number, updatedAt: number, note?: string, tags?: string[] }} VaultTab */
 /** @typedef {{ url: string, title?: string }} NewTab */
 
 export const COLLECTION_COLORS = Object.freeze(['indigo', 'blue', 'teal', 'green', 'amber', 'orange', 'red', 'pink', 'gray']);
 export const MAX_TITLE_LENGTH = 500;
 export const MAX_URL_LENGTH = 8192;
 export const MAX_NAME_LENGTH = 120;
+export const MAX_NOTE_LENGTH = 2000;
+export const MAX_TAGS = 20;
 
 /**
  * @template {{ sortOrder: number, createdAt?: number }} T
@@ -58,13 +60,36 @@ export function planAddTabs(existing, incoming, { skipDuplicates }) {
       continue;
     }
     seen.add(key);
-    toAdd.push({ url, title: String(item.title || url).slice(0, MAX_TITLE_LENGTH) });
+    /** @type {{ url: string, title: string, note?: string, tags?: string[] }} */
+    const entry = { url, title: String(item.title || url).slice(0, MAX_TITLE_LENGTH) };
+    const extra = /** @type {{ note?: unknown, tags?: unknown }} */ (item);
+    if (typeof extra.note === 'string' && extra.note.trim()) entry.note = extra.note.trim().slice(0, MAX_NOTE_LENGTH);
+    if (Array.isArray(extra.tags) && extra.tags.length) entry.tags = normalizeTags(extra.tags.map(String));
+    toAdd.push(entry);
   }
   return { toAdd, duplicates, invalid };
 }
 
 /**
- * Case-insensitive AND search over title and URL.
+ * Normalise user-entered tags: lower-case, no leading '#', unique, bounded.
+ * @param {string | string[] | undefined} input comma/space separated or array
+ * @returns {string[]}
+ */
+export function normalizeTags(input) {
+  const text = String(input ?? '');
+  const raw = Array.isArray(input) ? input : text.includes(',') ? text.split(',') : text.split(/\s+/);
+  const out = [];
+  for (const t of raw) {
+    const tag = String(t).trim().replace(/^#+/, '').replace(/\s+/g, ' ').toLowerCase().slice(0, 40);
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/**
+ * Case-insensitive AND search over title, URL, note and tags. A term
+ * starting with '#' must match a tag exactly.
  * @param {VaultTab[]} tabs
  * @param {string} query
  * @returns {VaultTab[]}
@@ -73,9 +98,50 @@ export function searchTabs(tabs, query) {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
   return tabs.filter((t) => {
-    const hay = `${t.title}\n${t.url}`.toLowerCase();
-    return terms.every((term) => hay.includes(term));
+    const hay = `${t.title}\n${t.url}\n${t.note ?? ''}`.toLowerCase();
+    const tags = t.tags ?? [];
+    return terms.every((term) => (term.startsWith('#') && term.length > 1 ? tags.includes(term.slice(1)) : hay.includes(term) || tags.some((g) => g.includes(term))));
   });
+}
+
+/** Every tag in use with its count, most used first. @param {VaultTab[]} tabs */
+export function tagCounts(tabs) {
+  const counts = new Map();
+  for (const t of tabs) for (const tag of t.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/**
+ * Starred collections first, then manual order.
+ * @param {Collection[]} collections
+ */
+export function orderCollections(collections) {
+  return [...sortByOrder(collections)].sort((a, b) => Number(!!b.starred) - Number(!!a.starred));
+}
+
+/**
+ * New tab order within a collection.
+ * @param {VaultTab[]} tabs
+ * @param {'title' | 'site' | 'newest' | 'oldest'} by
+ * @returns {string[]} ids
+ */
+export function planSortTabs(tabs, by) {
+  const host = (u) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '');
+    } catch {
+      return u;
+    }
+  };
+  const list = sortByOrder(tabs);
+  const cmp = {
+    title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+    site: (a, b) => host(a.url).localeCompare(host(b.url)) || a.title.localeCompare(b.title),
+    newest: (a, b) => b.createdAt - a.createdAt,
+    oldest: (a, b) => a.createdAt - b.createdAt,
+  }[by];
+  if (!cmp) throw new Error(`Unknown sort ${by}`);
+  return [...list].sort(cmp).map((t) => t.id);
 }
 
 /**
@@ -113,7 +179,12 @@ export function exportVaultJson(collections, tabsByCollection, now = new Date())
       name: c.name,
       color: c.color,
       createdAt: c.createdAt,
-      tabs: (tabsByCollection.get(c.id) ?? []).map((t) => ({ url: t.url, title: t.title })),
+      tabs: (tabsByCollection.get(c.id) ?? []).map((t) => ({
+        url: t.url,
+        title: t.title,
+        ...(t.note ? { note: t.note } : {}),
+        ...(t.tags?.length ? { tags: t.tags } : {}),
+      })),
     })),
   };
 }
@@ -196,6 +267,13 @@ export function parseVaultImport(text, fallbackName = 'Imported') {
     return { collections: [], errors: ['This JSON file is not a BrowseKit TabVault export or backup.'] };
   }
 
+  if (/<!DOCTYPE NETSCAPE-Bookmark-file-1>|<DL\b/i.test(trimmed.slice(0, 2000))) {
+    const collections = parseBookmarksHtml(trimmed, fallbackName);
+    return collections.length
+      ? { collections, errors: [] }
+      : { collections: [], errors: ['No bookmarks found in this HTML file.'] };
+  }
+
   // Line-based formats.
   /** @type {ImportedCollection[]} */
   const collections = [];
@@ -235,4 +313,96 @@ export function parseVaultImport(text, fallbackName = 'Imported') {
   }
   if (invalid) errors.push(`${invalid} line(s) were not valid URLs and were skipped.`);
   return { collections: collections.filter((c) => c.tabs.length), errors };
+}
+
+// --- Bookmarks HTML (Netscape format, used by every browser) -------------------
+
+/** @param {string} s */
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** @param {string} s */
+function decodeEntities(s) {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * Export collections as a bookmarks HTML file (one folder per collection),
+ * importable by Chrome, Firefox, Edge and Safari.
+ * @param {Collection[]} collections
+ * @param {Map<string, VaultTab[]>} tabsByCollection
+ * @param {Date} [now]
+ */
+export function exportBookmarksHtml(collections, tabsByCollection, now = new Date()) {
+  const ts = Math.floor(now.getTime() / 1000);
+  const lines = [
+    '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+    '<!-- Exported by BrowseKit. -->',
+    '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+    '<TITLE>Bookmarks</TITLE>',
+    '<H1>Bookmarks</H1>',
+    '<DL><p>',
+    `    <DT><H3 ADD_DATE="${ts}">BrowseKit TabVault</H3>`,
+    '    <DL><p>',
+  ];
+  for (const c of sortByOrder(collections)) {
+    lines.push(`        <DT><H3 ADD_DATE="${Math.floor(c.createdAt / 1000)}">${escapeHtml(c.name)}</H3>`, '        <DL><p>');
+    for (const t of tabsByCollection.get(c.id) ?? []) {
+      lines.push(`            <DT><A HREF="${escapeHtml(t.url)}" ADD_DATE="${Math.floor(t.createdAt / 1000)}">${escapeHtml(t.title)}</A>`);
+    }
+    lines.push('        </DL><p>');
+  }
+  lines.push('    </DL><p>', '</DL><p>', '');
+  return lines.join('\n');
+}
+
+/**
+ * Parse a bookmarks HTML file into collections: one per folder that directly
+ * contains links (named by its folder path). Links outside any folder go to
+ * `fallbackName`.
+ * @param {string} html
+ * @param {string} [fallbackName]
+ * @returns {ImportedCollection[]}
+ */
+export function parseBookmarksHtml(html, fallbackName = 'Bookmarks') {
+  /** @type {string[]} */
+  const path = [];
+  let pendingFolder = null;
+  /** @type {Map<string, { url: string, title: string }[]>} */
+  const byFolder = new Map();
+  const token = /<H3[^>]*>([\s\S]*?)<\/H3>|<DL[^>]*>|<\/DL>|<A\s[^>]*HREF\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/A>/gi;
+  for (const m of html.matchAll(token)) {
+    const tag = m[0].slice(0, 3).toUpperCase();
+    if (m[1] !== undefined) {
+      pendingFolder = decodeEntities(m[1].replace(/<[^>]*>/g, '')).trim() || 'Folder';
+    } else if (tag === '<DL') {
+      if (pendingFolder !== null) path.push(pendingFolder);
+      else path.push('');
+      pendingFolder = null;
+    } else if (tag === '</D') {
+      path.pop();
+    } else if (m[2] !== undefined) {
+      const url = decodeEntities(m[2]).trim();
+      const title = decodeEntities(m[3].replace(/<[^>]*>/g, '')).trim();
+      const name = path.filter(Boolean).join(' / ').replace(/^BrowseKit TabVault(?: \/ |$)/, '') || fallbackName;
+      const list = byFolder.get(name) ?? [];
+      list.push({ url, title });
+      byFolder.set(name, list);
+    }
+  }
+  const out = [];
+  for (const [name, tabs] of byFolder) {
+    const plan = planAddTabs([], tabs, { skipDuplicates: false });
+    if (plan.toAdd.length) out.push({ name: cleanName(name) || fallbackName, color: 'indigo', tabs: plan.toAdd });
+  }
+  return out;
 }

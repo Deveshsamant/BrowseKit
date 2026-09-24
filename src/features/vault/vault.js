@@ -5,7 +5,18 @@
 import { notifyChange, promisify, transaction } from '../../shared/db/database.js';
 import { STORES } from '../../shared/db/schema.js';
 import { cleanUrl } from '../../shared/urls.js';
-import { COLLECTION_COLORS, cleanName, groupTabs, nextSortOrder, planAddTabs, sortByOrder } from './vault-model.js';
+import {
+  COLLECTION_COLORS,
+  MAX_NOTE_LENGTH,
+  cleanName,
+  groupTabs,
+  nextSortOrder,
+  normalizeTags,
+  orderCollections,
+  planAddTabs,
+  planSortTabs,
+  sortByOrder,
+} from './vault-model.js';
 
 const C = STORES.COLLECTIONS;
 const T = STORES.VAULT_TABS;
@@ -23,7 +34,7 @@ export async function loadVault() {
   const [collections, tabs] = await transaction([C, T], 'readonly', (tx) =>
     Promise.all([promisify(tx.objectStore(C).getAll()), promisify(tx.objectStore(T).getAll())]),
   );
-  return { collections: sortByOrder(collections), tabs, tabsByCollection: groupTabs(tabs) };
+  return { collections: orderCollections(collections), tabs, tabsByCollection: groupTabs(tabs) };
 }
 
 /** @returns {Promise<Collection[]>} */
@@ -59,7 +70,7 @@ export async function createCollection({ name, color }) {
 
 /**
  * @param {string} id
- * @param {{ name?: string, color?: string }} patch
+ * @param {{ name?: string, color?: string, starred?: boolean }} patch
  */
 export async function updateCollection(id, patch) {
   await transaction(C, 'readwrite', async (tx) => {
@@ -72,6 +83,7 @@ export async function updateCollection(id, patch) {
       record.name = clean;
     }
     if (patch.color !== undefined && COLLECTION_COLORS.includes(patch.color)) record.color = patch.color;
+    if (patch.starred !== undefined) record.starred = !!patch.starred;
     record.updatedAt = Date.now();
     store.put(record);
   });
@@ -137,7 +149,7 @@ export async function addTabs(collectionId, items, { skipDuplicates = true, clea
 
 /**
  * @param {string} id
- * @param {{ title?: string, url?: string }} patch
+ * @param {{ title?: string, url?: string, note?: string, tags?: string | string[] }} patch
  */
 export async function updateTab(id, patch) {
   await transaction(T, 'readwrite', async (tx) => {
@@ -150,6 +162,8 @@ export async function updateTab(id, patch) {
       if (!plan.toAdd.length) throw new Error('That is not a valid URL.');
       record.url = plan.toAdd[0].url;
     }
+    if (patch.note !== undefined) record.note = String(patch.note).trim().slice(0, MAX_NOTE_LENGTH);
+    if (patch.tags !== undefined) record.tags = normalizeTags(patch.tags);
     record.updatedAt = Date.now();
     store.put(record);
   });
@@ -204,6 +218,16 @@ export async function reorderTabs(collectionId, orderedIds) {
 }
 
 /**
+ * Re-order a collection's tabs by title, site or date.
+ * @param {string} collectionId
+ * @param {'title' | 'site' | 'newest' | 'oldest'} by
+ */
+export async function sortTabs(collectionId, by) {
+  const existing = await transaction(T, 'readonly', (tx) => promisify(tx.objectStore(T).index('collectionId').getAll(collectionId)));
+  await reorderTabs(collectionId, planSortTabs(existing, by));
+}
+
+/**
  * Create collections from parsed import data.
  * @param {import('./vault-model.js').ImportedCollection[]} imported
  * @returns {Promise<{ collections: number, tabs: number }>}
@@ -219,7 +243,7 @@ export async function importCollections(imported) {
       const id = crypto.randomUUID();
       cStore.put({ id, name: col.name, color: col.color, sortOrder: order++, createdAt: now, updatedAt: now });
       col.tabs.forEach((tab, i) => {
-        tStore.put({ id: crypto.randomUUID(), collectionId: id, url: tab.url, title: tab.title, sortOrder: i, createdAt: now, updatedAt: now });
+        tStore.put({ id: crypto.randomUUID(), collectionId: id, ...tab, sortOrder: i, createdAt: now, updatedAt: now });
       });
       tabCount += col.tabs.length;
     }

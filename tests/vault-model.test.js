@@ -88,3 +88,64 @@ test('rejects unknown JSON and empty files', () => {
   assert.equal(parseVaultImport('{bad json').errors.length, 1);
   assert.equal(parseVaultImport('   ').errors.length, 1);
 });
+
+import { exportBookmarksHtml, normalizeTags, orderCollections, parseBookmarksHtml, planSortTabs, tagCounts } from '../src/features/vault/vault-model.js';
+
+test('tags: normalise, search with #tag, notes searchable, counts', () => {
+  assert.deepEqual(normalizeTags('#Work, read  Later, work'), ['work', 'read later']);
+  assert.deepEqual(normalizeTags('a b #c'), ['a', 'b', 'c']);
+  const tabs = [
+    { ...tab('1', 'c', 'https://a.com/', 'Alpha', 0), tags: ['work'], note: 'pricing table' },
+    { ...tab('2', 'c', 'https://b.com/', 'Beta', 1), tags: ['workshop'] },
+  ];
+  assert.deepEqual(searchTabs(tabs, '#work').map((t) => t.id), ['1'], '#tag is exact');
+  assert.deepEqual(searchTabs(tabs, 'work').map((t) => t.id), ['1', '2'], 'plain term matches tag substrings');
+  assert.deepEqual(searchTabs(tabs, 'pricing').map((t) => t.id), ['1']);
+  assert.deepEqual(tagCounts(tabs), [['work', 1], ['workshop', 1]]);
+});
+
+test('starred collections come first; sorting tabs by title/site/date', () => {
+  const cols = [
+    { id: 'a', name: 'A', sortOrder: 0, createdAt: 0 },
+    { id: 'b', name: 'B', sortOrder: 1, createdAt: 0, starred: true },
+  ];
+  assert.deepEqual(orderCollections(cols).map((c) => c.id), ['b', 'a']);
+  const tabs = [
+    { ...tab('1', 'c', 'https://www.z.com/', 'beta', 0), createdAt: 3 },
+    { ...tab('2', 'c', 'https://a.com/', 'Alpha', 1), createdAt: 1 },
+    { ...tab('3', 'c', 'https://m.com/', 'gamma', 2), createdAt: 2 },
+  ];
+  assert.deepEqual(planSortTabs(tabs, 'title'), ['2', '1', '3']);
+  assert.deepEqual(planSortTabs(tabs, 'site'), ['2', '3', '1']);
+  assert.deepEqual(planSortTabs(tabs, 'newest'), ['1', '3', '2']);
+  assert.deepEqual(planSortTabs(tabs, 'oldest'), ['2', '3', '1']);
+});
+
+test('bookmarks HTML: export escapes, re-import round-trips, nested folders and loose links', () => {
+  const collections = [{ id: 'c', name: 'R&D <x>', color: 'teal', sortOrder: 0, createdAt: 1e12, updatedAt: 1 }];
+  const grouped = groupTabs([{ ...tab('1', 'c', 'https://a.com/?a=1&b=2', 'A "q" & more', 0), createdAt: 1e12 }]);
+  const html = exportBookmarksHtml(collections, grouped);
+  assert.match(html, /R&amp;D &lt;x&gt;/);
+  assert.match(html, /HREF="https:\/\/a.com\/\?a=1&amp;b=2"/);
+  assert.deepEqual(parseVaultImport(html).collections, [{ name: 'R&D <x>', color: 'indigo', tabs: [{ url: 'https://a.com/?a=1&b=2', title: 'A "q" & more' }] }]);
+
+  const chrome = `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>
+    <DT><A HREF="https://loose.test/">Loose</A>
+    <DT><H3>Bookmarks bar</H3><DL><p>
+      <DT><A HREF="https://bar.test/">Bar &#8211; one</A>
+      <DT><H3>Dev</H3><DL><p><DT><A HREF="https://dev.test/">Dev</A><DT><A HREF="javascript:alert(1)">bad</A></DL><p>
+    </DL><p></DL><p>`;
+  const parsed = parseBookmarksHtml(chrome, 'Imported');
+  assert.deepEqual(parsed.map((c) => [c.name, c.tabs.map((t) => t.title)]), [
+    ['Imported', ['Loose']],
+    ['Bookmarks bar', ['Bar – one']],
+    ['Bookmarks bar / Dev', ['Dev']],
+  ]);
+});
+
+test('JSON export keeps tags and notes through re-import', () => {
+  const collections = [{ id: 'c', name: 'N', color: 'teal', sortOrder: 0, createdAt: 1, updatedAt: 1 }];
+  const grouped = groupTabs([{ ...tab('1', 'c', 'https://a.com/', 'A', 0), tags: ['x'], note: 'hi' }]);
+  const parsed = parseVaultImport(JSON.stringify(exportVaultJson(collections, grouped)));
+  assert.deepEqual(parsed.collections[0].tabs[0], { url: 'https://a.com/', title: 'A', note: 'hi', tags: ['x'] });
+});

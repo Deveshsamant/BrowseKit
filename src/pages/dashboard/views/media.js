@@ -6,6 +6,7 @@ import { h, mount, toast } from '../../../shared/dom.js';
 import { formatDateTime } from '../../../shared/format.js';
 import { getSettings, onSettingsChanged, updateSettings } from '../../../shared/settings.js';
 import { confirmDialog, emptyState, errorMessage } from '../../../shared/ui.js';
+import { numberInput, settingRow, toggle } from '../controls.js';
 import {
   MEDIA_SITES_KEY,
   getSites,
@@ -15,6 +16,7 @@ import {
   requestAutoAccess,
   revokeAutoAccess,
 } from '../../../features/media/media-sites.js';
+import { clearPositions } from '../../../features/media/positions.js';
 
 /** @param {HTMLElement} root */
 export async function render(root) {
@@ -27,6 +29,7 @@ export async function render(root) {
   const seekStep = numberInput(settings.media.seekStep, 1, 600, 1, (v) => updateSettings({ media: { seekStep: v } }));
   const inPage = toggle(settings.media.inPageShortcuts, (v) => updateSettings({ media: { inPageShortcuts: v } }));
   const overlay = toggle(settings.media.showOverlay, (v) => updateSettings({ media: { showOverlay: v } }));
+  const resume = toggle(settings.media.resumePlayback, (v) => updateSettings({ media: { resumePlayback: v } }));
 
   mount(
     root,
@@ -46,6 +49,8 @@ export async function render(root) {
         settingRow('Seek step in seconds', seekStep),
         settingRow('In-page keys: [ slower, ] faster, \\ reset', inPage),
         settingRow('Show on-page indicator when changing speed or volume', overlay),
+        settingRow('Resume videos where you left off', resume, 'For media of 2+ minutes, on pages where Media Boost runs (after you used it there, or sites with automatic access). Positions stay on this device.'),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn--sm', type: 'button', onClick: () => clearPositions().then(() => toast('Saved positions cleared.'), fail) }, 'Clear saved positions')),
         h('p', { class: 'muted small' }, 'Speed can be anything from 0.25× to 16×. Volume goes to 600% where boosting is possible.'),
       ),
       h(
@@ -73,6 +78,7 @@ export async function render(root) {
           h('li', null, 'Media inside cross-origin iframes is only reachable if that iframe’s site is also granted; media in closed shadow DOM or canvas/WebGL players is unreachable.'),
           h('li', null, 'Some players reset the speed. BrowseKit re-applies your choice, adopts changes you make with the site’s own controls, and backs off if a player keeps overriding it.'),
           h('li', null, 'Live streams can only be seeked within their buffered window.'),
+          h('li', null, 'Picture-in-picture needs a recent click on the page; sites can disable it. Resume matches the page URL, so single-page apps that change video without changing the URL may not resume.'),
         ),
       ),
     ),
@@ -210,6 +216,7 @@ export async function render(root) {
     seekStep.value = String(s.media.seekStep);
     inPage.checked = s.media.inPageShortcuts;
     overlay.checked = s.media.showOverlay;
+    resume.checked = s.media.resumePlayback;
   });
   return () => {
     chrome.storage.onChanged.removeListener(onStorage);
@@ -217,51 +224,4 @@ export async function render(root) {
     chrome.permissions.onRemoved.removeListener(onPerms);
     unsubscribe();
   };
-}
-
-/** @param {string} label @param {HTMLElement} control */
-export function settingRow(label, control) {
-  return h('label', { class: 'setting-row' }, h('span', null, label), control);
-}
-
-/**
- * @param {boolean} checked
- * @param {(v: boolean) => Promise<unknown>} onChange
- */
-export function toggle(checked, onChange) {
-  const input = h('input', {
-    type: 'checkbox',
-    class: 'switch',
-    role: 'switch',
-    checked,
-    onChange: () => onChange(input.checked).catch((err) => toast(errorMessage(err), 'error')),
-  });
-  return input;
-}
-
-/**
- * @param {number} value
- * @param {number} min
- * @param {number} max
- * @param {number} step
- * @param {(v: number) => Promise<unknown>} onChange
- */
-function numberInput(value, min, max, step, onChange) {
-  const input = h('input', {
-    class: 'input input--num',
-    type: 'number',
-    value: String(value),
-    min: String(min),
-    max: String(max),
-    step: String(step),
-    onChange: () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v) || v < min || v > max) {
-        toast(`Enter a value between ${min} and ${max}.`, 'error');
-        return;
-      }
-      onChange(v).catch((err) => toast(errorMessage(err), 'error'));
-    },
-  });
-  return input;
 }

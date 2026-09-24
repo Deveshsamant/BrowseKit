@@ -15,6 +15,7 @@ import {
   removeFromWatchLater,
   setWatched,
 } from '../../../features/watch-later/watch-later.js';
+import { getPositions, progressFor } from '../../../features/media/positions.js';
 
 const FILTERS = [
   { value: 'unwatched', label: 'To watch' },
@@ -25,6 +26,7 @@ const FILTERS = [
 /** @param {HTMLElement} root */
 export async function render(root) {
   let items = await listWatchLater();
+  let positions = await getPositions();
   const state = { filter: 'unwatched', query: '' };
   const fail = (err) => toast(errorMessage(err), 'error');
 
@@ -63,6 +65,19 @@ export async function render(root) {
   );
   const openAllBtn = h('button', { class: 'btn btn--primary', type: 'button', onClick: openAll }, 'Open all');
   const clearBtn = h('button', { class: 'btn', type: 'button', onClick: clearAllWatched }, 'Clear watched');
+  const randomBtn = h(
+    'button',
+    {
+      class: 'btn',
+      type: 'button',
+      title: 'Open a random unwatched item',
+      onClick: () => {
+        const pool = items.filter((i) => !i.watched);
+        if (pool.length) open([pool[Math.floor(Math.random() * pool.length)]], false).catch(fail);
+      },
+    },
+    '🎲 Surprise me',
+  );
 
   mount(
     root,
@@ -70,7 +85,7 @@ export async function render(root) {
       'header',
       { class: 'page-header' },
       h('div', null, h('h1', null, 'Watch Later'), summary),
-      h('div', { class: 'btn-row' }, openAllBtn, clearBtn),
+      h('div', { class: 'btn-row' }, randomBtn, openAllBtn, clearBtn),
     ),
     h('div', { class: 'toolbar' }, search, filterControl),
     h(
@@ -96,6 +111,7 @@ export async function render(root) {
     openAllBtn.disabled = !list.length;
     openAllBtn.textContent = list.length ? `Open ${list.length === items.length ? 'all' : `${list.length} shown`}` : 'Open all';
     clearBtn.disabled = items.length === unwatched;
+    randomBtn.disabled = !unwatched;
 
     if (!list.length) {
       mount(
@@ -139,6 +155,7 @@ export async function render(root) {
                 },
                 h('span', { class: 'row__title' }, item.title),
                 h('span', { class: 'row__sub' }, `${hostOf(item.url)} · added ${formatDateTime(item.addedAt)}`),
+                progressBar(progressFor(positions, item.url)),
               ),
               h(
                 'span',
@@ -204,6 +221,7 @@ export async function render(root) {
   renderList();
   const refresh = debounce(async () => {
     items = await listWatchLater();
+    positions = await getPositions();
     renderList();
   }, 50);
   const unsubscribe = onDatabaseChange((d) => {
@@ -213,4 +231,13 @@ export async function render(root) {
     unsubscribe();
     document.removeEventListener('keydown', onKey);
   };
+}
+
+/** @param {ReturnType<typeof progressFor>} pos */
+function progressBar(pos) {
+  if (!pos || pos.progress < 0.02) return null;
+  const pct = Math.round(pos.progress * 100);
+  const bar = h('span', { class: 'progress__fill' });
+  bar.style.width = `${pct}%`; // CSSOM: allowed by CSP
+  return h('span', { class: 'progress', title: `Watched ${pct}%`, role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100 }, bar);
 }

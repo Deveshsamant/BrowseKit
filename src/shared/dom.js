@@ -20,7 +20,8 @@ export function h(tag, props, ...children) {
       el.addEventListener(key.slice(2).toLowerCase(), value);
     } else if (key === 'style') {
       throw new Error('Inline styles are blocked by CSP; use a class');
-    } else if (key in el && typeof value !== 'string') el[key] = value;
+    } else if (key === 'value') el.value = value; // property: <textarea> has no value attribute
+    else if (key in el && typeof value !== 'string') el[key] = value;
     else el.setAttribute(key, value === true ? '' : String(value));
   }
   append(el, children);

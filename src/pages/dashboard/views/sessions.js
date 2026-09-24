@@ -6,7 +6,12 @@ import { onDatabaseChange } from '../../../shared/db/database.js';
 import { h, mount, toast } from '../../../shared/dom.js';
 import { formatDateTime, formatNumber } from '../../../shared/format.js';
 import { focusTab, ownOrigin } from '../../../shared/tabs.js';
-import { confirmDialog, debounce, emptyState, errorMessage, favicon, promptDialog } from '../../../shared/ui.js';
+import { confirmDialog, debounce, emptyState, errorMessage, favicon, promptDialog, selectDialog } from '../../../shared/ui.js';
+import { getSettings } from '../../../shared/settings.js';
+import { bumpStat } from '../../../shared/stats.js';
+import { cancelSnooze, listSnoozed, snoozeTab, wakeNow } from '../../../features/snooze/snooze.js';
+import { SNOOZE_PRESETS, wakeTimeFor } from '../../../features/snooze/snooze-model.js';
+import { mergeWindowsInto, sortWindowBySite, suspendAllBackgroundTabs } from '../../../features/tab-manager/tab-actions.js';
 import { hostOf } from '../../../shared/urls.js';
 import { findDuplicateGroups, searchOpenTabs } from '../../../features/tab-manager/tab-model.js';
 import {
@@ -16,13 +21,15 @@ import {
   restoreSession,
   saveCurrentSession,
   sessionTabCount,
+  switchToSession,
 } from '../../../features/sessions/sessions.js';
 
 const PANELS = [
   { id: 'open', label: 'Open tabs' },
   { id: 'duplicates', label: 'Duplicates' },
   { id: 'closed', label: 'Recently closed' },
-  { id: 'saved', label: 'Saved sessions' },
+  { id: 'snoozed', label: 'Snoozed' },
+  { id: 'saved', label: 'Sessions & workspaces' },
 ];
 
 /**
@@ -91,7 +98,9 @@ export async function render(root, { params }) {
       if (state.panel === 'open') renderOpen(tabs);
       else if (state.panel === 'duplicates') renderDuplicates(groups);
       else if (state.panel === 'closed') await renderClosed();
+      else if (state.panel === 'snoozed') await renderSnoozed();
       else await renderSaved();
+      setCount('snoozed', (await listSnoozed()).length);
     } catch (err) {
       fail(err);
     }
@@ -110,7 +119,26 @@ export async function render(root, { params }) {
   });
 
   const openCount = h('span', { class: 'muted small' });
-  const openToolbar = h('div', { class: 'toolbar' }, search, openCount);
+  const tidyAction = (fn, done) => async () => {
+    try {
+      toast(done(await fn()));
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const openToolbar = h(
+    'div',
+    { class: 'toolbar' },
+    search,
+    h(
+      'div',
+      { class: 'btn-row' },
+      openCount,
+      h('button', { class: 'btn btn--sm', type: 'button', title: 'Group this window’s tabs by site (pinned tabs stay first)', onClick: tidyAction(async () => sortWindowBySite((await chrome.windows.getCurrent()).id), (n) => `Sorted ${n} tabs by site.`) }, 'Sort by site'),
+      h('button', { class: 'btn btn--sm', type: 'button', title: 'Move every tab into this window', onClick: tidyAction(async () => mergeWindowsInto((await chrome.windows.getCurrent()).id), (n) => `Moved ${n} tabs into this window.`) }, 'Merge windows'),
+      h('button', { class: 'btn btn--sm', type: 'button', title: 'Unload background tabs; they reload when you open them', onClick: tidyAction(suspendAllBackgroundTabs, (n) => `Suspended ${n} background tabs.`) }, 'Free memory'),
+    ),
+  );
   const openList = h('div', { class: 'stack' });
 
   /** @param {chrome.tabs.Tab[]} tabs */
@@ -168,6 +196,7 @@ export async function render(root, { params }) {
       h(
         'span',
         { class: 'row__actions' },
+        h('button', { class: 'icon-btn', type: 'button', title: 'Snooze', 'aria-label': `Snooze ${t.title}`, onClick: () => snoozeDialog(t) }, '⏰'),
         h('button', { class: 'icon-btn icon-btn--danger', type: 'button', title: 'Close tab', 'aria-label': `Close ${t.title}`, onClick: () => chrome.tabs.remove(/** @type {number} */ (t.id)).catch(fail) }, '✕'),
       ),
     );
@@ -225,6 +254,7 @@ export async function render(root, { params }) {
   async function closeExtras(extras) {
     try {
       await chrome.tabs.remove(extras.map((t) => /** @type {number} */ (t.id)));
+      await bumpStat('duplicatesClosed', extras.length);
       toast(`Closed ${extras.length} duplicate tab${extras.length === 1 ? '' : 's'}.`);
     } catch (err) {
       fail(err);
@@ -276,9 +306,75 @@ export async function render(root, { params }) {
     }
   }
 
+  // --- Snoozed ---------------------------------------------------------------------
+  async function snoozeDialog(tab) {
+    const choice = await selectDialog({
+      title: 'Snooze tab',
+      label: 'Reopen it',
+      options: SNOOZE_PRESETS.map((p) => ({ value: p.id, label: `${p.label} (${formatDateTime(wakeTimeFor(/** @type {any} */ (p.id)))})` })),
+      value: 'tomorrow',
+      confirmLabel: 'Snooze',
+    });
+    if (!choice) return;
+    try {
+      await snoozeTab(tab, wakeTimeFor(/** @type {any} */ (choice)));
+      toast('Tab snoozed. It will reopen automatically.');
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  async function renderSnoozed() {
+    const items = await listSnoozed();
+    mount(
+      panelHost,
+      h('p', { class: 'muted small' }, 'Snoozed tabs reopen in the background at their time. If the browser is closed then, they open shortly after it starts.'),
+      items.length
+        ? h(
+            'div',
+            { class: 'list-card' },
+            h(
+              'ul',
+              { class: 'rows' },
+              items.map((z) =>
+                h(
+                  'li',
+                  { class: 'row' },
+                  favicon(z.url),
+                  h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, z.title), h('span', { class: 'row__sub' }, `${hostOf(z.url)} · reopens ${formatDateTime(z.wakeAt)}`)),
+                  h(
+                    'span',
+                    { class: 'row__actions row__actions--visible' },
+                    h('button', { class: 'btn btn--sm', type: 'button', onClick: () => wakeNow(z.id).catch(fail) }, 'Open now'),
+                    h('button', { class: 'icon-btn icon-btn--danger', type: 'button', title: 'Cancel snooze', 'aria-label': `Cancel snooze for ${z.title}`, onClick: () => cancelSnooze(z.id).catch(fail) }, '✕'),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : emptyState('No snoozed tabs', 'Snooze a tab from the popup (Tabs → Snooze), the ⏰ button in Open tabs, or the “Snooze tab” shortcut.'),
+    );
+  }
+
   // --- Saved sessions ------------------------------------------------------------
   async function renderSaved() {
-    const sessions = await listSessions();
+    const all = await listSessions();
+    const sessions = all.filter((x) => x.kind !== 'autosave');
+    const autosaves = all.filter((x) => x.kind === 'autosave');
+    const { autosaveMinutes } = (await getSettings()).sessions;
+    const autosaveSection = h(
+      'section',
+      { class: 'stack' },
+      h('h2', { class: 'section-title' }, 'Autosaves'),
+      h(
+        'p',
+        { class: 'muted small' },
+        autosaveMinutes
+          ? `Every ${autosaveMinutes} minutes (when something changed), BrowseKit snapshots your windows so you can recover after a crash or an accidental close. Change this in Settings.`
+          : 'Autosave is off. Turn it on in Settings to recover windows after a crash.',
+      ),
+      autosaves.length ? autosaves.map(sessionCard) : h('p', { class: 'muted small' }, 'No autosaves yet.'),
+    );
     if (!sessions.length) {
       mount(
         panelHost,
@@ -287,40 +383,61 @@ export async function render(root, { params }) {
           'A session is a snapshot of every open window. Save one before a restart or to switch between projects.',
           h('button', { class: 'btn btn--primary', type: 'button', onClick: saveSession }, 'Save current session'),
         ),
+        autosaveSection,
       );
       return;
     }
     mount(
       panelHost,
-      sessions.map((s) => {
-        const n = sessionTabCount(s);
-        return h(
-          'section',
-          { class: 'list-card' },
+      h('p', { class: 'muted small' }, 'Use sessions as workspaces: “Switch” opens a session and closes everything else — what was open is kept as an autosave, so nothing is lost.'),
+      sessions.map(sessionCard),
+      autosaveSection,
+    );
+  }
+
+  /** @param {import('../../../features/sessions/sessions.js').Session} s */
+  function sessionCard(s) {
+    const n = sessionTabCount(s);
+    return h(
+      'section',
+      { class: 'list-card' },
+      h(
+        'div',
+        { class: 'list-toolbar' },
+        h('div', { class: 'grow' }, h('strong', null, s.name), h('div', { class: 'muted small' }, `${formatDateTime(s.createdAt)} · ${s.windows.length} window${s.windows.length === 1 ? '' : 's'} · ${n} tab${n === 1 ? '' : 's'}`)),
+        h('button', { class: 'btn btn--sm btn--primary', type: 'button', onClick: () => restore(s) }, 'Restore'),
+        h('button', { class: 'btn btn--sm', type: 'button', title: 'Open this session and close everything else', onClick: () => switchTo(s) }, 'Switch'),
+        h('button', { class: 'btn btn--sm', type: 'button', onClick: () => rename(s) }, 'Rename'),
+        h('button', { class: 'btn btn--sm btn--danger', type: 'button', onClick: () => remove(s) }, 'Delete'),
+      ),
+      h(
+        'details',
+        { class: 'details' },
+        h('summary', null, 'Show tabs'),
+        s.windows.map((w, i) =>
           h(
             'div',
-            { class: 'list-toolbar' },
-            h('div', { class: 'grow' }, h('strong', null, s.name), h('div', { class: 'muted small' }, `${formatDateTime(s.createdAt)} · ${s.windows.length} window${s.windows.length === 1 ? '' : 's'} · ${n} tab${n === 1 ? '' : 's'}`)),
-            h('button', { class: 'btn btn--sm btn--primary', type: 'button', onClick: () => restore(s) }, 'Restore'),
-            h('button', { class: 'btn btn--sm', type: 'button', onClick: () => rename(s) }, 'Rename'),
-            h('button', { class: 'btn btn--sm btn--danger', type: 'button', onClick: () => remove(s) }, 'Delete'),
+            null,
+            h('p', { class: 'muted small pad' }, `Window ${i + 1}`),
+            h('ul', { class: 'rows' }, w.tabs.map((t) => h('li', { class: 'row' }, favicon(t.url), h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, t.title), h('span', { class: 'row__sub' }, hostOf(t.url))), t.pinned && h('span', { class: 'badge badge--muted' }, 'Pinned')))),
           ),
-          h(
-            'details',
-            { class: 'details' },
-            h('summary', null, 'Show tabs'),
-            s.windows.map((w, i) =>
-              h(
-                'div',
-                null,
-                h('p', { class: 'muted small pad' }, `Window ${i + 1}`),
-                h('ul', { class: 'rows' }, w.tabs.map((t) => h('li', { class: 'row' }, favicon(t.url), h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, t.title), h('span', { class: 'row__sub' }, hostOf(t.url))), t.pinned && h('span', { class: 'badge badge--muted' }, 'Pinned')))),
-              ),
-            ),
-          ),
-        );
-      }),
+        ),
+      ),
     );
+  }
+
+  async function switchTo(session) {
+    const ok = await confirmDialog({
+      title: `Switch to “${session.name}”?`,
+      body: 'BrowseKit saves what is open now as an autosave, opens this session, then closes the previous windows (including this dashboard).',
+      confirmLabel: 'Switch',
+    });
+    if (!ok) return;
+    try {
+      await switchToSession(session, (await getSettings()).sessions.autosaveKeep);
+    } catch (err) {
+      fail(err);
+    }
   }
 
   async function saveSession() {
@@ -364,7 +481,7 @@ export async function render(root, { params }) {
   tabEvents.forEach((ev) => ev.addListener(refresh));
   chrome.sessions.onChanged.addListener(refresh);
   const unsubscribe = onDatabaseChange((d) => {
-    if (d.stores.includes('sessions') && state.panel === 'saved') refresh();
+    if ((d.stores.includes('sessions') && state.panel === 'saved') || d.stores.includes('snoozed')) refresh();
   });
   const onKey = (/** @type {KeyboardEvent} */ e) => {
     if (e.key === '/' && state.panel === 'open' && !/** @type {HTMLElement} */ (e.target).closest('input, textarea, select, [contenteditable]')) {

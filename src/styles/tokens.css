@@ -75,3 +75,31 @@
   --bk-focus: #a5a0ff;
   --bk-shadow: 0 1px 2px rgb(0 0 0 / 40%);
 }
+
+/* Accent colours (Settings → Appearance). Light values, then dark overrides. */
+:root[data-accent='blue'] { --bk-accent: #2563eb; --bk-accent-strong: #1d4ed8; --bk-accent-soft: #e6effd; --bk-focus: #2563eb; }
+:root[data-accent='teal'] { --bk-accent: #0f766e; --bk-accent-strong: #115e59; --bk-accent-soft: #e0f3f1; --bk-focus: #0f766e; }
+:root[data-accent='green'] { --bk-accent: #15803d; --bk-accent-strong: #166534; --bk-accent-soft: #e4f4e9; --bk-focus: #15803d; }
+:root[data-accent='rose'] { --bk-accent: #e11d48; --bk-accent-strong: #be123c; --bk-accent-soft: #fde8ec; --bk-focus: #e11d48; }
+:root[data-accent='amber'] { --bk-accent: #b45309; --bk-accent-strong: #92400e; --bk-accent-soft: #fdf1e1; --bk-focus: #b45309; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light'])[data-accent='blue'] { --bk-accent: #7aa7ff; --bk-accent-strong: #9dbdff; --bk-accent-soft: #1c2a4a; --bk-focus: #9dbdff; }
+  :root:not([data-theme='light'])[data-accent='teal'] { --bk-accent: #4fd1c5; --bk-accent-strong: #7fe0d6; --bk-accent-soft: #123532; --bk-focus: #7fe0d6; }
+  :root:not([data-theme='light'])[data-accent='green'] { --bk-accent: #5fd38a; --bk-accent-strong: #86e2a8; --bk-accent-soft: #15331f; --bk-focus: #86e2a8; }
+  :root:not([data-theme='light'])[data-accent='rose'] { --bk-accent: #fb7190; --bk-accent-strong: #fd97ad; --bk-accent-soft: #3d1621; --bk-focus: #fd97ad; }
+  :root:not([data-theme='light'])[data-accent='amber'] { --bk-accent: #f5b454; --bk-accent-strong: #f8c97f; --bk-accent-soft: #3a2a12; --bk-focus: #f8c97f; }
+}
+:root[data-theme='dark'][data-accent='blue'] { --bk-accent: #7aa7ff; --bk-accent-strong: #9dbdff; --bk-accent-soft: #1c2a4a; --bk-focus: #9dbdff; }
+:root[data-theme='dark'][data-accent='teal'] { --bk-accent: #4fd1c5; --bk-accent-strong: #7fe0d6; --bk-accent-soft: #123532; --bk-focus: #7fe0d6; }
+:root[data-theme='dark'][data-accent='green'] { --bk-accent: #5fd38a; --bk-accent-strong: #86e2a8; --bk-accent-soft: #15331f; --bk-focus: #86e2a8; }
+:root[data-theme='dark'][data-accent='rose'] { --bk-accent: #fb7190; --bk-accent-strong: #fd97ad; --bk-accent-soft: #3d1621; --bk-focus: #fd97ad; }
+:root[data-theme='dark'][data-accent='amber'] { --bk-accent: #f5b454; --bk-accent-strong: #f8c97f; --bk-accent-soft: #3a2a12; --bk-focus: #f8c97f; }
+
+/* Compact density */
+:root[data-density='compact'] {
+  --bk-space-3: 8px;
+  --bk-space-4: 12px;
+  --bk-space-5: 16px;
+  --bk-space-6: 24px;
+}

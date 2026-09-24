@@ -20,13 +20,15 @@ export const ALLOWED_PERMISSIONS = new Set([
   'activeTab',
   'scripting',
   'sessions',
+  'alarms',
+  'sidePanel',
 ]);
 export const ALLOWED_OPTIONAL_HOSTS = new Set(['https://*/*', 'http://*/*']);
 
 /** Remote URLs allowed to appear in source (XML namespaces, not fetched). */
-const URL_ALLOWLIST = [/^http:\/\/www\.w3\.org\//];
+export const URL_ALLOWLIST = [/^http:\/\/www\.w3\.org\//];
 
-const BANNED_CODE = [
+export const BANNED_CODE = [
   [/\bfetch\s*\(/, 'network request (fetch)'],
   [/\bXMLHttpRequest\b/, 'network request (XMLHttpRequest)'],
   [/\bWebSocket\b/, 'network connection (WebSocket)'],
@@ -124,6 +126,7 @@ export function validateExtension(root) {
     m.action?.default_popup,
     m.options_page,
     m.options_ui?.page,
+    m.side_panel?.default_path,
     m.background?.service_worker,
     ...(m.content_scripts ?? []).flatMap((cs) => [...(cs.js ?? []), ...(cs.css ?? [])]),
   ].filter(Boolean);

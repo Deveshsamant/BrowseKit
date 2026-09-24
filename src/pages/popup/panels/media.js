@@ -135,6 +135,9 @@ export async function renderMediaPanel(root, ctx) {
   const muteBtn = h('button', { class: 'btn btn--sm', type: 'button', onClick: () => run({ op: 'toggleMute' }) });
   const playBtn = h('button', { class: 'btn btn--sm btn--primary', type: 'button', onClick: () => run({ op: 'togglePlay' }) });
   const timeLabel = h('span', { class: 'muted small mono' });
+  const loopLabel = h('span', { class: 'muted small' });
+  const loopOff = h('button', { class: 'btn btn--sm', type: 'button', onClick: () => run({ op: 'loopClear' }) }, 'Loop off');
+  const pipBtn = h('button', { class: 'btn btn--sm', type: 'button', title: 'Picture-in-picture', onClick: () => run({ op: 'pip' }) }, 'PiP');
   const seekStep = settings.media.seekStep;
 
   const rememberBox = h('input', { type: 'checkbox', checked: remembered, onChange: toggleRemember });
@@ -179,6 +182,11 @@ export async function renderMediaPanel(root, ctx) {
 
   function update() {
     if (!status) return;
+    const loop = status.loop;
+    loopOff.hidden = !loop;
+    loopLabel.textContent = loop ? (loop.b === null ? `Loop start set at ${fmtTime(loop.a)} — press “Loop B” at the end point.` : `Looping ${fmtTime(loop.a)}–${fmtTime(loop.b)}`) : '';
+    pipBtn.hidden = !status.pip && !status.inPip;
+    pipBtn.textContent = status.inPip ? 'Exit PiP' : 'PiP';
     speedValue.textContent = `${status.speed ?? 1}×`;
     presetButtons.forEach((b, i) => b.classList.toggle('is-active', PRESETS[i] === status?.speed));
     const pct = Math.round((status.volume ?? 1) * 100);
@@ -257,6 +265,15 @@ export async function renderMediaPanel(root, ctx) {
         h('button', { class: 'btn btn--sm', type: 'button', onClick: () => run({ op: 'reset' }) }, 'Reset'),
       ),
       timeLabel,
+      h(
+        'div',
+        { class: 'media-transport' },
+        h('button', { class: 'btn btn--sm', type: 'button', title: 'Set loop start at the current time', onClick: () => run({ op: 'loopA' }) }, 'Loop A'),
+        h('button', { class: 'btn btn--sm', type: 'button', title: 'Set loop end at the current time', onClick: () => run({ op: 'loopB' }) }, 'Loop B'),
+        loopOff,
+        pipBtn,
+      ),
+      loopLabel,
     ),
     h(
       'section',

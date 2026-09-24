@@ -3,49 +3,78 @@ import { MAX_BACKUP_BYTES, buildBackup, validateBackup } from '../../../shared/d
 import { clearAll, restore, snapshot } from '../../../shared/db/repository.js';
 import { h, mount, toast } from '../../../shared/dom.js';
 import { downloadFile } from '../../../shared/files.js';
-import { formatBytes, formatNumber, isoDay } from '../../../shared/format.js';
+import { formatBytes, formatDateTime, formatNumber, isoDay } from '../../../shared/format.js';
 import { send } from '../../../shared/messages.js';
 import {
+  ACCENTS,
   THEMES,
   ensureSettings,
   getSettings,
   onSettingsChanged,
   updateSettings,
 } from '../../../shared/settings.js';
+import { decryptJson, encryptJson, isEncryptedBackup } from '../../../shared/crypto-backup.js';
 import { confirmDialog, errorMessage } from '../../../shared/ui.js';
 import { MEDIA_SITES_KEY, getSites, grantedOrigins } from '../../../features/media/media-sites.js';
-import { settingRow, toggle } from './media.js';
+import { backupStatus, markBackedUp } from '../../../features/backup/backup-status.js';
+import { numberInput, selectControl, settingRow, toggle } from '../controls.js';
 
 const THEME_LABELS = { system: 'System', light: 'Light', dark: 'Dark' };
 
-/** @param {HTMLElement} root */
-export async function render(root) {
+/**
+ * @param {HTMLElement} root
+ * @param {{ params: URLSearchParams }} ctx
+ */
+export async function render(root, { params }) {
   const settings = await getSettings();
   const fail = (err) => toast(errorMessage(err), 'error');
   const save = (patch) => updateSettings(patch);
 
-  // Appearance
+  // --- Appearance ------------------------------------------------------------
   const themeInputs = THEMES.map((theme) =>
-    h('input', {
-      type: 'radio',
-      name: 'theme',
-      value: theme,
-      checked: settings.theme === theme,
-      onChange: () => save({ theme }).catch(fail),
-    }),
+    h('input', { type: 'radio', name: 'theme', value: theme, checked: settings.theme === theme, onChange: () => save({ theme }).catch(fail) }),
   );
   const themeControl = h(
     'div',
     { class: 'segmented', role: 'radiogroup', 'aria-label': 'Theme' },
     THEMES.map((theme, i) => h('label', null, themeInputs[i], THEME_LABELS[theme])),
   );
+  const accentInputs = ACCENTS.map((accent) =>
+    h('input', { type: 'radio', name: 'accent', value: accent, checked: settings.ui.accent === accent, 'aria-label': accent, onChange: () => save({ ui: { accent } }).catch(fail) }),
+  );
+  const accentControl = h(
+    'div',
+    { class: 'swatches', role: 'radiogroup', 'aria-label': 'Accent colour' },
+    ACCENTS.map((accent, i) => h('label', { class: `swatch swatch--${accent}`, title: accent }, accentInputs[i])),
+  );
+  const densityControl = selectControl(
+    [
+      { value: 'comfortable', label: 'Comfortable' },
+      { value: 'compact', label: 'Compact' },
+    ],
+    settings.ui.density,
+    (v) => save({ ui: { density: v } }),
+    'Density',
+  );
+  const actionControl = selectControl(
+    [
+      { value: 'popup', label: 'Popup' },
+      { value: 'sidepanel', label: 'Side panel' },
+    ],
+    settings.ui.actionOpens,
+    (v) => save({ ui: { actionOpens: v } }),
+    'Toolbar button opens',
+  );
 
-  // Behaviour
-  const openIn = h(
-    'select',
-    { class: 'btn select', 'aria-label': 'Open collections in', onChange: () => save({ vault: { openIn: openIn.value } }).catch(fail) },
-    h('option', { value: 'current-window', selected: settings.vault.openIn === 'current-window' }, 'Current window'),
-    h('option', { value: 'new-window', selected: settings.vault.openIn === 'new-window' }, 'New window'),
+  // --- Behaviour ---------------------------------------------------------------
+  const openIn = selectControl(
+    [
+      { value: 'current-window', label: 'Current window' },
+      { value: 'new-window', label: 'New window' },
+    ],
+    settings.vault.openIn,
+    (v) => save({ vault: { openIn: v } }),
+    'Open collections in',
   );
   const toggles = {
     skipDuplicates: toggle(settings.vault.skipDuplicates, (v) => save({ vault: { skipDuplicates: v } })),
@@ -53,14 +82,37 @@ export async function render(root) {
     markWatchedOnOpen: toggle(settings.watchLater.markWatchedOnOpen, (v) => save({ watchLater: { markWatchedOnOpen: v } })),
     cleanUrlsOnSave: toggle(settings.privacy.cleanUrlsOnSave, (v) => save({ privacy: { cleanUrlsOnSave: v } })),
   };
+  const nums = {
+    autoSuspend: numberInput(settings.tabs.autoSuspendMinutes, 0, 1440, 5, (v) => save({ tabs: { autoSuspendMinutes: v } }), 'Auto-suspend after minutes'),
+    autoClose: numberInput(settings.tabs.autoCloseMinutes, 0, 10080, 15, (v) => save({ tabs: { autoCloseMinutes: v } }), 'Auto-close after minutes'),
+    autosave: numberInput(settings.sessions.autosaveMinutes, 0, 1440, 5, (v) => save({ sessions: { autosaveMinutes: v } }), 'Autosave every minutes'),
+    keep: numberInput(settings.sessions.autosaveKeep, 1, 50, 1, (v) => save({ sessions: { autosaveKeep: v } }), 'Autosaves to keep'),
+    remind: numberInput(settings.backup.remindDays, 0, 365, 1, (v) => save({ backup: { remindDays: v } }), 'Backup reminder days'),
+  };
+  const neverTouch = /** @type {HTMLTextAreaElement} */ (
+    h('textarea', {
+      class: 'input textarea',
+      rows: 2,
+      placeholder: 'mail.example.com, docs.example.org',
+      'aria-label': 'Sites never suspended or auto-closed',
+      value: settings.tabs.neverTouchHosts.join(', '),
+      onChange: () =>
+        save({ tabs: { neverTouchHosts: neverTouch.value.split(/[\s,]+/).filter(Boolean) } })
+          .then(() => toast('Saved.'))
+          .catch(fail),
+    })
+  );
 
-  // Data
+  // --- Data ------------------------------------------------------------------------
   const importErrors = h('ul', { class: 'error-list', hidden: true });
-  const importMode = h(
-    'select',
-    { class: 'btn select', 'aria-label': 'Import mode' },
-    h('option', { value: 'merge' }, 'Merge with existing data'),
-    h('option', { value: 'replace' }, 'Replace all existing data'),
+  const importMode = selectControl(
+    [
+      { value: 'merge', label: 'Merge with existing data' },
+      { value: 'replace', label: 'Replace all existing data' },
+    ],
+    'merge',
+    async () => {},
+    'Import mode',
   );
   const fileInput = h('input', {
     type: 'file',
@@ -68,21 +120,70 @@ export async function render(root) {
     class: 'visually-hidden',
     onChange: () => importFile(fileInput, importMode.value, importErrors),
   });
+  const password = /** @type {HTMLInputElement} */ (
+    h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'Password (optional, 8+ characters)', 'aria-label': 'Backup password' })
+  );
+  const lastBackup = h('p', { class: 'muted small' });
+  const refreshBackupLine = async () => {
+    const { lastBackupAt, due } = await backupStatus();
+    lastBackup.textContent = lastBackupAt ? `Last backup: ${formatDateTime(lastBackupAt)}${due ? ' — time for a new one.' : '.'}` : 'No backup exported yet.';
+    lastBackup.classList.toggle('error-text', due);
+  };
+  refreshBackupLine();
 
   const diagnostics = h('dl', { class: 'kv' }, h('dt', null, 'Status'), h('dd', null, 'Checking…'));
   loadDiagnostics(diagnostics);
 
+  const backupCard = h(
+    'section',
+    { class: 'card', id: 'backup' },
+    h('h2', { class: 'card__title' }, 'Backup & data'),
+    h('p', { class: 'muted' }, 'Your data lives only in this browser profile. Backups are JSON files saved to your computer; BrowseKit never uploads them anywhere.'),
+    lastBackup,
+    h('div', { class: 'field-row field-row--wrap' }, password, h('button', { class: 'btn btn--primary', type: 'button', onClick: () => exportBackup(password.value).then(refreshBackupLine) }, 'Export backup')),
+    h('p', { class: 'muted small' }, 'With a password, the file is encrypted with AES-256-GCM (key from PBKDF2-SHA-256). The password is never stored — if you lose it, the backup cannot be opened.'),
+    h('div', { class: 'btn-row' }, importMode, h('button', { class: 'btn', type: 'button', onClick: () => fileInput.click() }, 'Import backup…'), fileInput),
+    importErrors,
+    settingRow('Remind me to back up every (days, 0 = never)', nums.remind),
+    h(
+      'div',
+      { class: 'setting-row' },
+      h('span', { class: 'muted' }, 'Permanently delete every collection, saved item, session and setting.'),
+      h('button', { class: 'btn btn--danger', type: 'button', onClick: eraseAll }, 'Erase all data'),
+    ),
+  );
+
   mount(
     root,
-    h(
-      'header',
-      { class: 'page-header' },
-      h('div', null, h('h1', null, 'Settings'), h('p', { class: 'muted' }, 'Stored on this device only.')),
-    ),
+    h('header', { class: 'page-header' }, h('div', null, h('h1', null, 'Settings'), h('p', { class: 'muted' }, 'Stored on this device only.'))),
     h(
       'div',
       { class: 'stack' },
-      h('section', { class: 'card' }, h('h2', { class: 'card__title' }, 'Appearance'), h('div', { class: 'setting-row' }, h('span', null, 'Theme'), themeControl)),
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card__title' }, 'Appearance'),
+        h('div', { class: 'setting-row' }, h('span', null, 'Theme'), themeControl),
+        h('div', { class: 'setting-row' }, h('span', null, 'Accent colour'), accentControl),
+        settingRow('Density', densityControl),
+        settingRow('Toolbar button opens', actionControl, 'The side panel stays open next to the page while you browse.'),
+      ),
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card__title' }, 'Tabs & memory'),
+        settingRow('Auto-suspend idle background tabs after (minutes, 0 = off)', nums.autoSuspend, 'Unloads tabs to free memory; they reload when you open them. Unsaved form input on those pages may be lost.'),
+        settingRow('Auto-close idle tabs after (minutes, 0 = off)', nums.autoClose, 'Closed tabs go to the “Auto-closed tabs” collection in TabVault, so nothing is lost.'),
+        h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Never suspend or auto-close these sites'), neverTouch),
+        h('p', { class: 'muted small' }, 'Active, pinned and audio-playing tabs are never touched.'),
+      ),
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card__title' }, 'Sessions'),
+        settingRow('Autosave all windows every (minutes, 0 = off)', nums.autosave, 'Only when something changed. Use it to recover after a crash.'),
+        settingRow('Autosaves to keep', nums.keep),
+      ),
       h(
         'section',
         { class: 'card' },
@@ -91,46 +192,31 @@ export async function render(root) {
         settingRow('Skip tabs already saved in the same collection', toggles.skipDuplicates),
         settingRow('Close tabs after saving them', toggles.closeAfterSave),
       ),
-      h(
-        'section',
-        { class: 'card' },
-        h('h2', { class: 'card__title' }, 'Watch Later'),
-        settingRow('Mark items as watched when opened from BrowseKit', toggles.markWatchedOnOpen),
-      ),
+      h('section', { class: 'card' }, h('h2', { class: 'card__title' }, 'Watch Later'), settingRow('Mark items as watched when opened from BrowseKit', toggles.markWatchedOnOpen)),
       h(
         'section',
         { class: 'card' },
         h('h2', { class: 'card__title' }, 'Privacy'),
-        settingRow('Remove tracking parameters from URLs when saving', toggles.cleanUrlsOnSave),
-        h('p', { class: 'muted small' }, 'Only well-known trackers are removed (utm_*, fbclid, gclid…). Media Boost defaults and site access are under Media Boost.'),
+        settingRow('Remove tracking parameters from URLs when saving', toggles.cleanUrlsOnSave, 'Only well-known trackers (utm_*, fbclid, gclid…). Media Boost site access is under Media Boost.'),
       ),
-      h(
-        'section',
-        { class: 'card' },
-        h('h2', { class: 'card__title' }, 'Backup & data'),
-        h('p', { class: 'muted' }, 'Backups are plain JSON files saved to your computer. BrowseKit never uploads them anywhere.'),
-        h(
-          'div',
-          { class: 'btn-row' },
-          h('button', { class: 'btn btn--primary', type: 'button', onClick: exportBackup }, 'Export backup'),
-          importMode,
-          h('button', { class: 'btn', type: 'button', onClick: () => fileInput.click() }, 'Import backup…'),
-          fileInput,
-        ),
-        importErrors,
-        h(
-          'div',
-          { class: 'setting-row' },
-          h('span', { class: 'muted' }, 'Permanently delete every collection, saved item, session and setting.'),
-          h('button', { class: 'btn btn--danger', type: 'button', onClick: eraseAll }, 'Erase all data'),
-        ),
-      ),
+      backupCard,
       h('section', { class: 'card' }, h('h2', { class: 'card__title' }, 'About'), diagnostics),
     ),
   );
 
+  if (params.get('backup')) {
+    requestAnimationFrame(() => {
+      backupCard.scrollIntoView({ block: 'start' });
+      backupCard.classList.add('is-highlighted');
+      password.focus();
+    });
+  }
+
   return onSettingsChanged((next) => {
     for (const input of themeInputs) input.checked = input.value === next.theme;
+    for (const input of accentInputs) input.checked = input.value === next.ui.accent;
+    densityControl.value = next.ui.density;
+    actionControl.value = next.ui.actionOpens;
     openIn.value = next.vault.openIn;
     toggles.skipDuplicates.checked = next.vault.skipDuplicates;
     toggles.closeAfterSave.checked = next.vault.closeAfterSave;
@@ -158,7 +244,8 @@ async function loadDiagnostics(/** @type {HTMLElement} */ dl) {
   }
 }
 
-async function exportBackup() {
+/** @param {string} password optional; encrypts when set */
+async function exportBackup(password) {
   try {
     const backup = buildBackup({
       stores: await snapshot(),
@@ -166,13 +253,46 @@ async function exportBackup() {
       mediaSites: await getSites(),
       appVersion: chrome.runtime.getManifest().version,
     });
-    const json = JSON.stringify(backup, null, 2);
-    downloadFile(`browsekit-backup-${isoDay()}.json`, json, 'application/json');
-    toast(`Backup exported (${formatBytes(json.length)}).`);
+    const payload = password ? await encryptJson(backup, password) : backup;
+    const json = JSON.stringify(payload, null, 2);
+    downloadFile(`browsekit-backup-${isoDay()}${password ? '.encrypted' : ''}.json`, json, 'application/json');
+    await markBackedUp();
+    toast(`${password ? 'Encrypted backup' : 'Backup'} exported (${formatBytes(json.length)}).`);
   } catch (err) {
     console.error('[BrowseKit] export', err);
     toast(`Export failed: ${errorMessage(err)}`, 'error');
   }
+}
+
+/** Ask for a password with a masked field. @returns {Promise<string | null>} */
+function askPassword() {
+  return new Promise((resolve) => {
+    const input = /** @type {HTMLInputElement} */ (h('input', { class: 'input', type: 'password', autocomplete: 'current-password', 'aria-label': 'Backup password', required: true }));
+    const dialog = h(
+      'dialog',
+      { class: 'dialog', 'aria-label': 'Backup password' },
+      h(
+        'form',
+        { method: 'dialog', class: 'dialog__form' },
+        h('h2', { class: 'dialog__title' }, 'This backup is encrypted'),
+        h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Password'), input),
+        h(
+          'div',
+          { class: 'dialog__actions' },
+          h('button', { class: 'btn', type: 'submit', value: 'cancel', formNoValidate: true }, 'Cancel'),
+          h('button', { class: 'btn btn--primary', type: 'submit', value: 'ok' }, 'Decrypt'),
+        ),
+      ),
+    );
+    document.body.append(dialog);
+    dialog.addEventListener('close', () => {
+      const value = dialog.returnValue === 'ok' ? input.value : null;
+      dialog.remove();
+      resolve(value);
+    });
+    dialog.showModal();
+    input.focus();
+  });
 }
 
 /**
@@ -202,6 +322,16 @@ async function importFile(input, mode, errorList) {
   } catch {
     showErrors(['File is not valid JSON.']);
     return;
+  }
+  if (isEncryptedBackup(parsed)) {
+    const password = await askPassword();
+    if (!password) return;
+    try {
+      parsed = await decryptJson(parsed, password);
+    } catch (err) {
+      showErrors([errorMessage(err)]);
+      return;
+    }
   }
   const result = validateBackup(parsed);
   if (!result.ok) {
@@ -238,7 +368,7 @@ async function importFile(input, mode, errorList) {
 async function eraseAll() {
   const ok = await confirmDialog({
     title: 'Erase all BrowseKit data?',
-    body: 'This permanently deletes collections, Watch Later, sessions, remembered media sites, per-site access and settings on this device. Consider exporting a backup first.',
+    body: 'This permanently deletes collections, Watch Later, sessions, snoozed tabs, remembered media sites, per-site access, stats and settings on this device. Consider exporting a backup first.',
     confirmLabel: 'Erase everything',
     danger: true,
   });
@@ -246,6 +376,7 @@ async function eraseAll() {
   try {
     await clearAll();
     await chrome.storage.local.clear();
+    await chrome.storage.session.clear();
     const origins = await grantedOrigins();
     if (origins.length) await chrome.permissions.remove({ origins });
     await ensureSettings();

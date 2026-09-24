@@ -10,6 +10,18 @@ import { qrPngBlob, qrSvgFile, renderQrSvg } from '../../../shared/qr-view.js';
 import { WORDS_PER_MINUTE, formatReadingTime, textStats } from '../../../shared/text-stats.js';
 import { debounce, errorMessage } from '../../../shared/ui.js';
 import { cleanUrl } from '../../../shared/urls.js';
+import {
+  base64Decode,
+  base64Encode,
+  convertCase,
+  formatJson,
+  generatePassword,
+  hashText,
+  parseTimestamp,
+  urlDecode,
+  urlEncode,
+  uuid,
+} from '../../../shared/dev-tools.js';
 
 /** @param {string} text @param {string} what */
 async function copy(text, what) {
@@ -35,6 +47,7 @@ export function render(root) {
       { class: 'stack' },
       urlCleaner(),
       h('div', { class: 'two-col' }, textCounter(), qrGenerator()),
+      devTools(),
       h(
         'section',
         { class: 'card' },
@@ -42,7 +55,7 @@ export function render(root) {
         h(
           'p',
           { class: 'muted' },
-          'Open the BrowseKit toolbar popup → Tools to copy the URL/title/Markdown link, copy a clean URL, count words and reading time (selection or whole page), show a QR code, save or copy a screenshot of the visible area, or print / save as PDF.',
+          'Open the BrowseKit popup → Tools for Reader view, link extraction, copy URL/title/Markdown link, clean URL, word count and reading time, QR code, visible-area screenshot, and print / save as PDF.',
         ),
       ),
     ),
@@ -161,5 +174,81 @@ function qrGenerator() {
         'Copy image',
       ),
     ),
+  );
+}
+
+/** Developer & text utilities with one shared input/output. */
+function devTools() {
+  const input = h('textarea', { class: 'input textarea mono', rows: 6, placeholder: 'Input…', 'aria-label': 'Tool input', spellcheck: false });
+  const output = h('textarea', { class: 'input textarea mono', rows: 6, readOnly: true, placeholder: 'Output', 'aria-label': 'Tool output', spellcheck: false });
+  const errorLine = h('p', { class: 'error-text small', 'aria-live': 'polite' });
+  const pwLength = h('input', { class: 'input input--num', type: 'number', min: '8', max: '128', value: '20', 'aria-label': 'Password length' });
+  const pwSymbols = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Include symbols' });
+
+  /** @param {() => string | Promise<string>} fn */
+  const run = (fn) => async () => {
+    errorLine.textContent = '';
+    try {
+      output.value = await fn();
+    } catch (err) {
+      output.value = '';
+      errorLine.textContent = errorMessage(err);
+    }
+  };
+  const json = (indent) => () => {
+    const r = formatJson(input.value, indent);
+    if (!r.ok) throw new Error(`Invalid JSON: ${r.error}`);
+    return r.text;
+  };
+  const group = (label, ...buttons) => h('div', { class: 'tool-group' }, h('span', { class: 'field__label' }, label), h('div', { class: 'btn-row' }, buttons));
+  const btn = (label, fn) => h('button', { class: 'btn btn--sm', type: 'button', onClick: run(fn) }, label);
+
+  return h(
+    'section',
+    { class: 'card' },
+    h('h2', { class: 'card__title' }, 'Developer & text tools'),
+    h('p', { class: 'muted small' }, 'Everything runs in this page. Nothing you paste is stored or sent anywhere.'),
+    h('div', { class: 'two-col two-col--tight' }, input, output),
+    errorLine,
+    h(
+      'div',
+      { class: 'tool-groups' },
+      group('JSON', btn('Format', json(2)), btn('Minify', json(0))),
+      group('Base64', btn('Encode', () => base64Encode(input.value)), btn('Decode', () => base64Decode(input.value))),
+      group('URL', btn('Encode', () => urlEncode(input.value)), btn('Decode', () => urlDecode(input.value))),
+      group('Hash', ...['SHA-1', 'SHA-256', 'SHA-512'].map((a) => btn(a, () => hashText(/** @type {any} */ (a), input.value)))),
+      group(
+        'Case',
+        ...[
+          ['UPPER', 'upper'],
+          ['lower', 'lower'],
+          ['Title', 'title'],
+          ['Sentence', 'sentence'],
+          ['camelCase', 'camel'],
+          ['snake_case', 'snake'],
+          ['kebab-case', 'kebab'],
+        ].map(([label, mode]) => btn(label, () => convertCase(input.value, /** @type {any} */ (mode)))),
+      ),
+      group(
+        'Timestamp',
+        btn('Convert', () => {
+          const r = parseTimestamp(input.value);
+          if (!r.ok) throw new Error(r.error);
+          return `ISO:     ${r.iso}\nLocal:   ${new Date(r.ms).toString()}\nSeconds: ${r.seconds}\nMillis:  ${r.ms}`;
+        }),
+        btn('Now', () => {
+          const now = Date.now();
+          return `ISO:     ${new Date(now).toISOString()}\nSeconds: ${Math.floor(now / 1000)}\nMillis:  ${now}`;
+        }),
+      ),
+      group(
+        'Generate',
+        btn('UUID', () => Array.from({ length: 5 }, uuid).join('\n')),
+        btn('Password', () => generatePassword({ length: Number(pwLength.value) || 20, symbols: pwSymbols.checked })),
+        h('label', { class: 'check small' }, 'Length', pwLength),
+        h('label', { class: 'check small' }, pwSymbols, 'Symbols'),
+      ),
+    ),
+    h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onClick: () => output.value && copy(output.value, 'output') }, 'Copy output'), h('button', { class: 'btn', type: 'button', onClick: () => { input.value = output.value; } }, 'Use output as input')),
   );
 }

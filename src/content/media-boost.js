@@ -24,12 +24,25 @@
   const MAX_VOLUME = 6; // 600 %
   const SITES_KEY = 'media.sites'; // keep in sync with src/features/media/media-sites.js
   const SETTINGS_KEY = 'settings';
+  const POSITIONS_KEY = 'media.positions'; // keep in sync with src/features/media/positions.js
+  const STATS_KEY = 'stats'; // keep in sync with src/shared/stats.js
+  const MIN_RESUME_DURATION = 120; // only remember positions in media of 2+ minutes
+  const MAX_POSITIONS = 300;
   const host = location.hostname;
   const hasStorage = typeof chrome !== 'undefined' && !!chrome.storage?.local;
 
   /** User's requested values for this frame; null = leave the page's own value. */
   const desired = { speed: /** @type {number|null} */ (null), volume: /** @type {number|null} */ (null) };
-  const options = { speedStep: 0.25, seekStep: 10, inPageShortcuts: true, showOverlay: true };
+  const options = { speedStep: 0.25, seekStep: 10, inPageShortcuts: true, showOverlay: true, resumePlayback: true };
+  /** A–B loop points per element. @type {WeakMap<HTMLMediaElement, { a: number, b: number | null }>} */
+  const loops = new WeakMap();
+  /** Last seen currentTime per element, for time-saved accounting. @type {WeakMap<HTMLMediaElement, number>} */
+  const lastTimes = new WeakMap();
+  /** @type {Record<string, { t: number, d: number, at: number }>} */
+  let positions = {};
+  const resumed = new Set();
+  let pendingSaved = 0;
+  let lastPositionWrite = 0;
   let siteRemembered = false;
 
   /** @type {AudioContext | null} */
@@ -208,6 +221,102 @@
     window.addEventListener(type, (e) => { if (e.isTrusted) lastUserInputAt = Date.now(); }, true);
   }
 
+  // --- Resume position, A–B loop, time saved ------------------------------------
+
+  /** Page identity for resume: URL without the #fragment. */
+  const pageKey = () => location.href.split('#')[0];
+  const fmtClock = (t) => {
+    const s = Math.floor(t);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+  };
+
+  function savePositions() {
+    if (!hasStorage) return;
+    const entries = Object.entries(positions).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_POSITIONS);
+    positions = Object.fromEntries(entries);
+    chrome.storage.local.set({ [POSITIONS_KEY]: positions }).catch(() => {});
+  }
+
+  /** @param {HTMLMediaElement} el @param {boolean} force */
+  function rememberPosition(el, force) {
+    if (!options.resumePlayback || !Number.isFinite(el.duration) || el.duration < MIN_RESUME_DURATION) return;
+    const key = pageKey();
+    const nearEnd = el.currentTime > el.duration - 15;
+    if (nearEnd) {
+      if (positions[key]) {
+        delete positions[key];
+        savePositions();
+      }
+      return;
+    }
+    if (el.currentTime < 10) return;
+    const now = Date.now();
+    if (!force && now - lastPositionWrite < 5000) return;
+    lastPositionWrite = now;
+    positions[key] = { t: Math.floor(el.currentTime), d: Math.floor(el.duration), at: now };
+    savePositions();
+  }
+
+  /** @param {HTMLMediaElement} el */
+  function maybeResume(el) {
+    const key = pageKey();
+    if (!options.resumePlayback || resumed.has(key)) return;
+    const saved = positions[key];
+    if (!saved || !Number.isFinite(el.duration) || el.duration < MIN_RESUME_DURATION) return;
+    if (Math.abs(el.duration - saved.d) > 5 || el.currentTime > 5 || saved.t > el.duration - 15) return;
+    resumed.add(key);
+    el.currentTime = saved.t;
+    flash(`Resumed at ${fmtClock(saved.t)}`);
+  }
+
+  document.addEventListener('loadedmetadata', (e) => {
+    if (e.target instanceof HTMLMediaElement) maybeResume(e.target);
+  }, true);
+  document.addEventListener('pause', (e) => {
+    if (e.target instanceof HTMLMediaElement) {
+      rememberPosition(e.target, true);
+      flushStats(); // unload-time writes can be dropped, so save at natural stopping points
+    }
+  }, true);
+  document.addEventListener('timeupdate', (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLMediaElement)) return;
+    // A–B loop.
+    const loop = loops.get(el);
+    if (loop && loop.b !== null && el.currentTime >= loop.b) el.currentTime = loop.a;
+    // Time saved by playing faster than 1×: content watched minus wall time.
+    const last = lastTimes.get(el);
+    lastTimes.set(el, el.currentTime);
+    if (last !== undefined && !el.paused && el.playbackRate > 1) {
+      const delta = el.currentTime - last;
+      if (delta > 0 && delta < 5) pendingSaved += delta * (1 - 1 / el.playbackRate);
+    }
+    rememberPosition(el, false);
+  }, true);
+
+  function flushStats() {
+    if (!hasStorage || pendingSaved < 1) return;
+    const add = pendingSaved;
+    pendingSaved = 0;
+    chrome.storage.local.get(STATS_KEY).then((got) => {
+      const stats = got[STATS_KEY] ?? { since: Date.now() };
+      stats.mediaSecondsSaved = (Number(stats.mediaSecondsSaved) || 0) + add;
+      return chrome.storage.local.set({ [STATS_KEY]: stats });
+    }).catch(() => {});
+  }
+  setInterval(flushStats, 30_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushStats();
+  });
+  window.addEventListener('pagehide', () => {
+    flushStats();
+    const el = primary();
+    if (el) rememberPosition(el, true);
+  });
+
   // --- Overlay ------------------------------------------------------------------
 
   let overlay = /** @type {HTMLElement | null} */ (null);
@@ -258,6 +367,9 @@
       live,
       boost: boostSupport(el),
       siteRemembered,
+      loop: loops.get(el) ?? null,
+      pip: el instanceof HTMLVideoElement && document.pictureInPictureEnabled && !el.disablePictureInPicture,
+      inPip: document.pictureInPictureElement === el,
       ...extra,
     };
   }
@@ -332,6 +444,49 @@
           desired.volume = null;
           if (el) flash('Reset');
           break;
+        case 'pip': {
+          const video = list.find((m) => m === el && m instanceof HTMLVideoElement) ?? list.find((m) => m instanceof HTMLVideoElement);
+          if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+          } else if (!video) {
+            error = 'Picture-in-picture needs a video (this page only has audio).';
+          } else if (!document.pictureInPictureEnabled || /** @type {HTMLVideoElement} */ (video).disablePictureInPicture) {
+            error = 'This site has disabled picture-in-picture.';
+          } else {
+            try {
+              await /** @type {HTMLVideoElement} */ (video).requestPictureInPicture();
+            } catch (err) {
+              error = /NotAllowed/.test(String(err))
+                ? 'Chrome needs a click on the page first. Click the video, then try again (or use the picture-in-picture shortcut).'
+                : err instanceof Error ? err.message : String(err);
+            }
+          }
+          break;
+        }
+        case 'loopA':
+          if (el) {
+            loops.set(el, { a: el.currentTime, b: null });
+            flash(`Loop start ${fmtClock(el.currentTime)}`);
+          }
+          break;
+        case 'loopB':
+          if (el) {
+            const loop = loops.get(el);
+            if (!loop) error = 'Set the loop start (A) first.';
+            else if (el.currentTime <= loop.a + 0.5) error = 'Loop end must be after the start.';
+            else {
+              loop.b = el.currentTime;
+              el.currentTime = loop.a;
+              flash(`Looping ${fmtClock(loop.a)}–${fmtClock(loop.b)}`);
+            }
+          }
+          break;
+        case 'loopClear':
+          if (el) {
+            loops.delete(el);
+            flash('Loop off');
+          }
+          break;
         case 'applySite':
           siteRemembered = true;
           desired.speed = cmd.prefs?.speed ?? null;
@@ -387,14 +542,18 @@
   // --- Load remembered settings for this site -----------------------------------
 
   if (hasStorage) {
-    chrome.storage.local.get([SITES_KEY, SETTINGS_KEY]).then((got) => {
+    chrome.storage.local.get([SITES_KEY, SETTINGS_KEY, POSITIONS_KEY]).then((got) => {
+      positions = got[POSITIONS_KEY] ?? {};
       const media = got[SETTINGS_KEY]?.media;
       if (media) Object.assign(options, {
         speedStep: media.speedStep ?? options.speedStep,
         seekStep: media.seekStep ?? options.seekStep,
         inPageShortcuts: media.inPageShortcuts ?? options.inPageShortcuts,
         showOverlay: media.showOverlay ?? options.showOverlay,
+        resumePlayback: media.resumePlayback ?? options.resumePlayback,
       });
+      const el = primary();
+      if (el) maybeResume(el);
       const prefs = got[SITES_KEY]?.[host];
       if (prefs) {
         siteRemembered = true;
@@ -407,7 +566,7 @@
       if (area !== 'local') return;
       if (changes[SETTINGS_KEY]?.newValue?.media) {
         const media = changes[SETTINGS_KEY].newValue.media;
-        Object.assign(options, { speedStep: media.speedStep, seekStep: media.seekStep, inPageShortcuts: media.inPageShortcuts, showOverlay: media.showOverlay });
+        Object.assign(options, { speedStep: media.speedStep, seekStep: media.seekStep, inPageShortcuts: media.inPageShortcuts, showOverlay: media.showOverlay, resumePlayback: media.resumePlayback !== false });
       }
       if (changes[SITES_KEY]) siteRemembered = !!changes[SITES_KEY].newValue?.[host];
     });

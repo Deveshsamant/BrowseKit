@@ -32,6 +32,8 @@ npm run smoke      # load the unpacked extension in Chromium and exercise every 
                    # (phase B uses a temp copy with test-server host access, because
                    #  automation can't grant activeTab or accept permission prompts)
 npm run icons      # regenerate assets/icons/*.png
+npm run policies   # list every policy (permissions, CSP, banned APIs); -- --write updates docs/POLICIES.md
+npm run package    # validate, then build dist/browsekit-<version>.zip
 ```
 
 Load in Chrome: `chrome://extensions` → Developer mode → Load unpacked → repo root.
@@ -49,6 +51,10 @@ Load in Chrome: `chrome://extensions` → Developer mode → Load unpacked → r
   or read `chrome.storage.local`.
 - Schema changes: bump `DB_VERSION` and add a migration in
   `src/shared/db/schema.js`; never edit an existing migration.
+- Scheduled work goes into `src/background/tick.js` (one alarm, idempotent
+  steps) — never add setInterval-based timers to the service worker.
+- New permissions also need a reason in `WHY` (`scripts/policies.mjs`) and
+  `PRIVACY.md`; run `npm run policies -- --write`.
 - Settings: add defaults to `DEFAULT_SETTINGS` and validation to
   `normalizeSettings` in `src/shared/settings.js`.
 - Put pure logic in `*-model.js` / shared modules and unit-test it; keep

@@ -9,7 +9,9 @@ import { qrPngBlob, renderQrSvg } from '../../../shared/qr-view.js';
 import { formatReadingTime, textStats } from '../../../shared/text-stats.js';
 import { errorMessage } from '../../../shared/ui.js';
 import { cleanUrl, hostOf, isScriptableUrl } from '../../../shared/urls.js';
-import { captureVisible, printTab, readPageText } from '../../../features/tools/page-tools.js';
+import { captureVisible, extractLinks, printTab, readPageText } from '../../../features/tools/page-tools.js';
+import { openReaderForTab } from '../../../features/tools/reader.js';
+import { addTabs, createCollection } from '../../../features/vault/vault.js';
 import { friendlyInjectionError } from '../../../features/media/media-control.js';
 
 /**
@@ -47,6 +49,48 @@ export async function renderToolsPanel(root, ctx) {
         h('p', { class: 'muted small stats-grid__note' }, `${source === 'selection' ? 'Selected text' : 'Whole page text (incl. menus/footers)'}${truncated ? ', first 5 MB' : ''} · ${238} wpm`),
       );
       statsOut.hidden = false;
+    } catch (err) {
+      toast(friendlyInjectionError(err), 'error');
+    }
+  }
+
+  const linksOut = h('div', { class: 'links-box', hidden: true });
+  async function showLinks() {
+    try {
+      const links = await extractLinks(/** @type {number} */ (tab?.id));
+      if (!links.length) {
+        toast('No links found on this page.');
+        return;
+      }
+      mount(
+        linksOut,
+        h('p', { class: 'small' }, h('strong', null, `${links.length} link${links.length === 1 ? '' : 's'}`), ' (selected text only, if you selected some)'),
+        h(
+          'div',
+          { class: 'btn-grid btn-grid--2' },
+          h('button', { class: 'btn btn--sm', type: 'button', onClick: () => copy(links.map((l) => l.url).join('\n'), `${links.length} links`) }, 'Copy all'),
+          h(
+            'button',
+            {
+              class: 'btn btn--sm',
+              type: 'button',
+              onClick: async () => {
+                try {
+                  const c = await createCollection({ name: `Links from ${hostOf(url)}` });
+                  const r = await addTabs(c.id, links, { skipDuplicates: true });
+                  toast(`Saved ${r.added} links to TabVault.`);
+                } catch (err) {
+                  toast(errorMessage(err), 'error');
+                }
+              },
+            },
+            'Save to TabVault',
+          ),
+        ),
+        h('ul', { class: 'link-list' }, links.slice(0, 8).map((l) => h('li', { title: l.url }, l.title))),
+        links.length > 8 && h('p', { class: 'muted small' }, `+${links.length - 8} more`),
+      );
+      linksOut.hidden = false;
     } catch (err) {
       toast(friendlyInjectionError(err), 'error');
     }
@@ -128,14 +172,26 @@ export async function renderToolsPanel(root, ctx) {
       h(
         'div',
         { class: 'btn-grid btn-grid--2' },
+        h(
+          'button',
+          {
+            class: 'btn',
+            type: 'button',
+            disabled: !scriptable,
+            onClick: () => openReaderForTab(/** @type {chrome.tabs.Tab} */ (tab)).then(ctx.close, (err) => toast(friendlyInjectionError(err), 'error')),
+          },
+          'Reader view',
+        ),
+        h('button', { class: 'btn', type: 'button', disabled: !scriptable, onClick: showLinks }, 'Extract links'),
         h('button', { class: 'btn', type: 'button', disabled: !scriptable, onClick: countWords }, 'Word count'),
         h('button', { class: 'btn', type: 'button', disabled: !url, onClick: showQr }, 'QR code'),
         h('button', { class: 'btn', type: 'button', onClick: () => screenshot('save') }, 'Save screenshot'),
         h('button', { class: 'btn', type: 'button', onClick: () => screenshot('copy') }, 'Copy screenshot'),
-        h('button', { class: 'btn', type: 'button', disabled: !scriptable, onClick: () => printTab(/** @type {number} */ (tab?.id)).then(() => window.close(), (err) => toast(friendlyInjectionError(err), 'error')) }, 'Print / PDF'),
+        h('button', { class: 'btn', type: 'button', disabled: !scriptable, onClick: () => printTab(/** @type {number} */ (tab?.id)).then(ctx.close, (err) => toast(friendlyInjectionError(err), 'error')) }, 'Print / PDF'),
         h('button', { class: 'btn', type: 'button', onClick: () => ctx.openDashboard(ROUTES.TOOLS) }, 'More tools →'),
       ),
       statsOut,
+      linksOut,
       qrHost,
       h('p', { class: 'muted small' }, 'Screenshots capture the visible area only. Browser pages can’t be read or printed by extensions.'),
     ),

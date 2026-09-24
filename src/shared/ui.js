@@ -141,3 +141,45 @@ export function debounce(fn, ms) {
 export function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Multi-field form dialog.
+ * @param {{ title: string, fields: { name: string, label: string, value?: string, type?: 'text' | 'url' | 'textarea', placeholder?: string, hint?: string, required?: boolean }[], confirmLabel?: string }} options
+ * @returns {Promise<Record<string, string> | null>}
+ */
+export function formDialog({ title, fields, confirmLabel = 'Save' }) {
+  return new Promise((resolve) => {
+    const inputs = fields.map((f) =>
+      f.type === 'textarea'
+        ? h('textarea', { class: 'input textarea', name: f.name, rows: 4, value: f.value ?? '', placeholder: f.placeholder ?? '', 'aria-label': f.label, maxLength: 2000 })
+        : h('input', { class: 'input', name: f.name, type: f.type ?? 'text', value: f.value ?? '', placeholder: f.placeholder ?? '', 'aria-label': f.label, required: !!f.required, maxLength: 8192 }),
+    );
+    const dialog = h(
+      'dialog',
+      { class: 'dialog', 'aria-label': title },
+      h(
+        'form',
+        { method: 'dialog', class: 'dialog__form' },
+        h('h2', { class: 'dialog__title' }, title),
+        fields.map((f, i) =>
+          h('label', { class: 'field' }, h('span', { class: 'field__label' }, f.label), inputs[i], f.hint && h('span', { class: 'muted small' }, f.hint)),
+        ),
+        h(
+          'div',
+          { class: 'dialog__actions' },
+          h('button', { class: 'btn', type: 'submit', value: 'cancel', formNoValidate: true }, 'Cancel'),
+          h('button', { class: 'btn btn--primary', type: 'submit', value: 'ok' }, confirmLabel),
+        ),
+      ),
+    );
+    document.body.append(dialog);
+    dialog.addEventListener('close', () => {
+      const ok = dialog.returnValue === 'ok';
+      const values = Object.fromEntries(fields.map((f, i) => [f.name, /** @type {HTMLInputElement} */ (inputs[i]).value]));
+      dialog.remove();
+      resolve(ok ? values : null);
+    });
+    dialog.showModal();
+    /** @type {HTMLElement} */ (inputs[0]).focus();
+  });
+}

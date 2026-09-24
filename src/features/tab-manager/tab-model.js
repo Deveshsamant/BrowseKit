@@ -55,3 +55,54 @@ export function searchOpenTabs(tabs, query) {
     return terms.every((term) => hay.includes(term));
   });
 }
+
+/**
+ * Tabs eligible for auto-suspend / auto-close: idle longer than `minutes`,
+ * not active, pinned, audible, already discarded (for suspend) or on a
+ * protected host. Uses Chrome's `lastAccessed` (Chrome 121+).
+ * @param {(TabLike & { lastAccessed?: number, discarded?: boolean, autoDiscardable?: boolean })[]} tabs
+ * @param {{ now: number, minutes: number, neverTouchHosts?: string[], forSuspend?: boolean, skipOrigin?: string }} options
+ */
+export function pickIdleTabs(tabs, { now, minutes, neverTouchHosts = [], forSuspend = false, skipOrigin }) {
+  if (!minutes) return [];
+  const cutoff = now - minutes * 60_000;
+  const protectedHosts = new Set(neverTouchHosts.map((h) => h.toLowerCase()));
+  return tabs.filter((t) => {
+    const url = urlOf(t);
+    if (!/^https?:/.test(url) || (skipOrigin && url.startsWith(skipOrigin))) return false;
+    if (t.active || t.pinned || t.audible) return false;
+    if (forSuspend && (t.discarded || t.autoDiscardable === false)) return false;
+    if (typeof t.lastAccessed !== 'number' || t.lastAccessed > cutoff) return false;
+    let host = '';
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return false;
+    }
+    return ![...protectedHosts].some((h) => host === h || host.endsWith(`.${h}`));
+  });
+}
+
+/**
+ * New order for a window's tabs: pinned tabs keep their order first, then the
+ * rest grouped by site (alphabetical by hostname, stable within a site).
+ * @param {TabLike[]} tabs tabs of one window
+ * @returns {number[]} tab ids in the new order
+ */
+export function planSortBySite(tabs) {
+  const ordered = [...tabs].sort((a, b) => a.index - b.index);
+  const hostOf = (t) => {
+    try {
+      return new URL(urlOf(t)).hostname.replace(/^www\./, '');
+    } catch {
+      return '~';
+    }
+  };
+  const pinned = ordered.filter((t) => t.pinned);
+  const rest = ordered
+    .filter((t) => !t.pinned)
+    .map((t, i) => ({ t, i, host: hostOf(t) }))
+    .sort((a, b) => a.host.localeCompare(b.host) || a.i - b.i)
+    .map((x) => x.t);
+  return [...pinned, ...rest].map((t) => /** @type {number} */ (t.id));
+}

@@ -1,0 +1,121 @@
+.reader-body {
+  --reader-bg: var(--bk-bg);
+  --reader-fg: var(--bk-text);
+  background: var(--reader-bg);
+  color: var(--reader-fg);
+}
+
+.reader-body[data-tone='sepia'] {
+  --reader-bg: #f4ecd8;
+  --reader-fg: #3b2f22;
+  color-scheme: light;
+}
+
+.reader-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bk-space-2);
+  padding: var(--bk-space-2) var(--bk-space-4);
+  border-bottom: 1px solid var(--bk-border);
+  background: var(--bk-surface);
+}
+
+.reader-bar__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bk-space-2);
+}
+
+.segmented--sm label {
+  padding: 2px var(--bk-space-2);
+  font-size: var(--bk-text-sm);
+}
+
+.reader {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding: var(--bk-space-6) var(--bk-space-4) 96px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.reader-body[data-width='narrow'] .reader {
+  max-width: 56ch;
+}
+
+.reader-body[data-width='wide'] .reader {
+  max-width: 88ch;
+}
+
+.reader-body[data-font='serif'] .reader {
+  font-family: Charter, 'Bitstream Charter', 'Iowan Old Style', Georgia, Cambria, 'Times New Roman', serif;
+}
+
+.reader__meta {
+  color: var(--bk-text-muted);
+  font-family: var(--bk-font);
+  font-size: var(--bk-text-sm);
+}
+
+.reader-body[data-tone='sepia'] .reader__meta {
+  color: #7a6a55;
+}
+
+.reader__title {
+  margin: var(--bk-space-2) 0 var(--bk-space-5);
+  font-size: 1.9em;
+  letter-spacing: -0.01em;
+}
+
+.reader__article p,
+.reader__article ul,
+.reader__article pre,
+.reader__article blockquote {
+  margin: 0 0 1em;
+}
+
+.reader__article h2,
+.reader__article h3,
+.reader__article h4 {
+  margin: 1.6em 0 0.6em;
+}
+
+.reader__article ul {
+  padding-left: 1.4em;
+}
+
+.reader__article blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--bk-accent);
+  font-style: italic;
+}
+
+.reader__article pre {
+  overflow-x: auto;
+  padding: var(--bk-space-3);
+  border-radius: var(--bk-radius-sm);
+  background: var(--bk-surface-2);
+  font-family: var(--bk-font-mono);
+  font-size: 0.8em;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.reader__note {
+  margin-top: var(--bk-space-6);
+  font-family: var(--bk-font);
+}
+
+@media print {
+  .reader-bar,
+  .reader__note,
+  .toast {
+    display: none;
+  }
+}

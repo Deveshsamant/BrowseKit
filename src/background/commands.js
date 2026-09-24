@@ -6,6 +6,10 @@ import { controlMedia, friendlyInjectionError } from '../features/media/media-co
 import { getSite, saveSite } from '../features/media/media-sites.js';
 import { addToWatchLater } from '../features/watch-later/watch-later.js';
 import { getSettings } from '../shared/settings.js';
+import { suspendAllBackgroundTabs } from '../features/tab-manager/tab-actions.js';
+import { snoozeTab } from '../features/snooze/snooze.js';
+import { wakeTimeFor } from '../features/snooze/snooze-model.js';
+import { openPaletteWindow } from './action.js';
 import { flashBadge } from './badge.js';
 import { saveActiveTabToLastCollection } from './menus.js';
 
@@ -14,6 +18,15 @@ import { saveActiveTabToLastCollection } from './menus.js';
  * @param {chrome.tabs.Tab | undefined} tab
  */
 export async function handleCommand(command, tab) {
+  if (command === 'open-palette') {
+    await openPaletteWindow();
+    return;
+  }
+  if (command === 'free-memory') {
+    const n = await suspendAllBackgroundTabs();
+    await flashBadge(tab?.id, String(n));
+    return;
+  }
   const tabId = tab?.id;
   if (tabId === undefined) return;
   const settings = await getSettings();
@@ -28,6 +41,10 @@ export async function handleCommand(command, tab) {
         await flashBadge(tabId, duplicate ? '↻' : '✓');
         return;
       }
+      case 'snooze-tab':
+        if (!tab) return;
+        await snoozeTab(tab, wakeTimeFor('tomorrow'));
+        return;
       case 'save-tab-to-vault':
         await saveActiveTabToLastCollection();
         await flashBadge(tabId, '✓');
@@ -49,6 +66,7 @@ const MEDIA_COMMANDS = {
   'media-seek-forward': (s) => ({ op: 'seek', delta: s.media.seekStep }),
   'media-seek-back': (s) => ({ op: 'seek', delta: -s.media.seekStep }),
   'media-toggle-play': () => ({ op: 'togglePlay' }),
+  'media-pip': () => ({ op: 'pip' }),
 };
 
 /**
